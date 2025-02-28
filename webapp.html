@@ -3,40 +3,48 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Менинг эълонларим ва сўровларим</title>
+    <title>Эълонлар доскаси</title>
     <style>
-        body { font-family: Arial, sans-serif; padding: 10px; }
-        .item { border: 1px solid #ccc; padding: 10px; margin: 5px 0; }
-        .photo { max-width: 200px; height: auto; }
+        body { font-family: Arial, sans-serif; padding: 10px; margin: 0; }
+        .container { display: flex; justify-content: space-between; }
+        .column { flex: 1; margin: 0 10px; border: 1px solid #ccc; padding: 10px; }
+        .item { border-bottom: 1px solid #ddd; padding: 5px 0; }
+        .photo { max-width: 100px; height: auto; }
+        h2 { text-align: center; }
     </style>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
-    <h1>Менинг маълумотларим</h1>
-    <button id="showProducts">Эълонлар</button>
-    <button id="showRequests">Сўровлар</button>
-    <div id="content"></div>
+    <h1>Эълонлар доскаси</h1>
+    <div class="container">
+        <div class="column" id="products">
+            <h2>Эълонлар</h2>
+        </div>
+        <div class="column" id="requests">
+            <h2>Сўровлар</h2>
+        </div>
+        <div class="column" id="archive">
+            <h2>Архив</h2>
+        </div>
+    </div>
 
     <script>
         const tg = window.Telegram.WebApp;
         tg.ready();
 
-        const userId = tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : null;
-        const baseUrl = "https://437d-90-156-164-75.ngrok-free.app"; // Замените на ваш URL (например, ngrok или развернутый сервер)
+        const baseUrl = "https://437d-90-156-164-75.ngrok-free.app"; // Ваш ngrok URL
 
-        document.getElementById("showProducts").addEventListener("click", async () => {
-            if (!userId) {
-                document.getElementById("content").innerHTML = "Фойдаланувчи ID топилмади.";
-                return;
-            }
-            const response = await fetch(`${baseUrl}/products?user_id=${userId}`);
-            const products = await response.json();
-            let html = "<h2>Эълонлар</h2>";
+        // Функция для загрузки данных
+        async function loadData() {
+            // Загрузка всех объявлений
+            const productsResponse = await fetch(`${baseUrl}/all_products`);
+            const products = await productsResponse.json();
+            let productsHtml = "";
             if (products.length === 0) {
-                html += "<p>Эълонлар йўқ.</p>";
+                productsHtml = "<p>Эълонлар йўқ.</p>";
             } else {
                 products.forEach(product => {
-                    html += `
+                    productsHtml += `
                         <div class="item">
                             <p>Эълон рақами: ${product.unique_id}</p>
                             <p>Категория: ${product.category}</p>
@@ -47,28 +55,23 @@
                     if (product.photos) {
                         const photos = product.photos.split(",");
                         photos.forEach(photo => {
-                            html += `<img class="photo" src="https://api.telegram.org/file/bot${tg.initDataUnsafe.bot_token}/${photo}" alt="Маҳсулот расми">`;
+                            productsHtml += `<img class="photo" src="${baseUrl}/photo/${photo}" alt="Маҳсулот расми">`;
                         });
                     }
-                    html += "</div>";
+                    productsHtml += "</div>";
                 });
             }
-            document.getElementById("content").innerHTML = html;
-        });
+            document.getElementById("products").innerHTML = "<h2>Эълонлар</h2>" + productsHtml;
 
-        document.getElementById("showRequests").addEventListener("click", async () => {
-            if (!userId) {
-                document.getElementById("content").innerHTML = "Фойдаланувчи ID топилмади.";
-                return;
-            }
-            const response = await fetch(`${baseUrl}/requests?user_id=${userId}`);
-            const requests = await response.json();
-            let html = "<h2>Сўровлар</h2>";
+            // Загрузка всех запросов
+            const requestsResponse = await fetch(`${baseUrl}/all_requests`);
+            const requests = await requestsResponse.json();
+            let requestsHtml = "";
             if (requests.length === 0) {
-                html += "<p>Сўровлар йўқ.</p>";
+                requestsHtml = "<p>Сўровлар йўқ.</p>";
             } else {
                 requests.forEach(req => {
-                    html += `
+                    requestsHtml += `
                         <div class="item">
                             <p>Сўров рақами: ${req.unique_id}</p>
                             <p>Категория: ${req.category}</p>
@@ -80,8 +83,38 @@
                     `;
                 });
             }
-            document.getElementById("content").innerHTML = html;
-        });
+            document.getElementById("requests").innerHTML = "<h2>Сўровлар</h2>" + requestsHtml;
+
+            // Загрузка архива
+            const archiveResponse = await fetch(`${baseUrl}/archive`);
+            const archive = await archiveResponse.json();
+            let archiveHtml = "";
+            if (archive.length === 0) {
+                archiveHtml = "<p>Архив бўш.</p>";
+            } else {
+                archive.forEach(item => {
+                    archiveHtml += `
+                        <div class="item">
+                            <p>Эълон рақами: ${item.unique_id}</p>
+                            <p>Категория: ${item.category}</p>
+                            <p>Тури: ${item.sort}</p>
+                            <p>Ҳажм: ${item.volume_ton} тонна</p>
+                            <p>Нарх: ${item.price} сўм</p>
+                    `;
+                    if (item.photos) {
+                        const photos = item.photos.split(",");
+                        photos.forEach(photo => {
+                            archiveHtml += `<img class="photo" src="${baseUrl}/photo/${photo}" alt="Маҳсулот расми">`;
+                        });
+                    }
+                    archiveHtml += "</div>";
+                });
+            }
+            document.getElementById("archive").innerHTML = "<h2>Архив</h2>" + archiveHtml;
+        }
+
+        // Загрузка данных при открытии
+        window.onload = loadData;
     </script>
 </body>
 </html>
