@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Менинг эълонларим ва сўровларим</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 10px; }
+        .item { border: 1px solid #ccc; padding: 10px; margin: 5px 0; }
+        .photo { max-width: 200px; height: auto; }
+    </style>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+    <h1>Менинг маълумотларим</h1>
+    <button id="showProducts">Эълонлар</button>
+    <button id="showRequests">Сўровлар</button>
+    <div id="content"></div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+
+        const userId = tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : null;
+        const baseUrl = "https://your-server-url"; // Замените на ваш URL (например, ngrok или развернутый сервер)
+
+        document.getElementById("showProducts").addEventListener("click", async () => {
+            if (!userId) {
+                document.getElementById("content").innerHTML = "Фойдаланувчи ID топилмади.";
+                return;
+            }
+            const response = await fetch(`${baseUrl}/products?user_id=${userId}`);
+            const products = await response.json();
+            let html = "<h2>Эълонлар</h2>";
+            if (products.length === 0) {
+                html += "<p>Эълонлар йўқ.</p>";
+            } else {
+                products.forEach(product => {
+                    html += `
+                        <div class="item">
+                            <p>Эълон рақами: ${product.unique_id}</p>
+                            <p>Категория: ${product.category}</p>
+                            <p>Тури: ${product.sort}</p>
+                            <p>Ҳажм: ${product.volume_ton} тонна</p>
+                            <p>Нарх: ${product.price} сўм</p>
+                    `;
+                    if (product.photos) {
+                        const photos = product.photos.split(",");
+                        photos.forEach(photo => {
+                            html += `<img class="photo" src="https://api.telegram.org/file/bot${tg.initDataUnsafe.bot_token}/${photo}" alt="Маҳсулот расми">`;
+                        });
+                    }
+                    html += "</div>";
+                });
+            }
+            document.getElementById("content").innerHTML = html;
+        });
+
+        document.getElementById("showRequests").addEventListener("click", async () => {
+            if (!userId) {
+                document.getElementById("content").innerHTML = "Фойдаланувчи ID топилмади.";
+                return;
+            }
+            const response = await fetch(`${baseUrl}/requests?user_id=${userId}`);
+            const requests = await response.json();
+            let html = "<h2>Сўровлар</h2>";
+            if (requests.length === 0) {
+                html += "<p>Сўровлар йўқ.</p>";
+            } else {
+                requests.forEach(req => {
+                    html += `
+                        <div class="item">
+                            <p>Сўров рақами: ${req.unique_id}</p>
+                            <p>Категория: ${req.category}</p>
+                            <p>Тури: ${req.sort}</p>
+                            <p>Ҳажм: ${req.volume_ton} тонна</p>
+                            <p>Нарх: ${req.price} сўм</p>
+                            <p>Вилоят: ${req.region}</p>
+                        </div>
+                    `;
+                });
+            }
+            document.getElementById("content").innerHTML = html;
+        });
+    </script>
+</body>
+</html>
