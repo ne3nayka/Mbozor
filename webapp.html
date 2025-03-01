@@ -103,15 +103,23 @@
             font-size: 14px;
             line-height: 1.4;
         }
+        .clickable {
+            color: #1a73e8;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+        .light .clickable:hover { color: #1557b0; }
+        .dark .clickable { color: #4dabf7; }
+        .dark .clickable:hover { color: #339af0; }
         .photo-container {
             display: flex;
             flex-wrap: wrap;
             gap: 5px;
         }
         .photo {
-            width: 100px;  /* Фиксированный размер */
+            width: 100px;
             height: 100px;
-            object-fit: cover;  /* Обрезка для квадратного формата */
+            object-fit: cover;
             border-radius: 5px;
         }
         .no-data {
@@ -154,6 +162,8 @@
 
         const baseUrl = "https://4f08-90-156-164-75.ngrok-free.app";
         let currentTheme = tg.colorScheme || 'light';
+        let allData = { products: [], requests: [], archive: [] };
+        let currentColumn = 'products';
 
         document.body.className = currentTheme;
 
@@ -161,13 +171,19 @@
             currentTheme = currentTheme === 'light' ? 'dark' : 'light';
             document.body.className = currentTheme;
             document.querySelector('.theme-toggle').textContent = currentTheme === 'light' ? 'Тёмная тема' : 'Светлая тема';
+            renderColumn(); // Перерисовываем текущий столбец с новой темой
         }
 
         function showColumn(columnId) {
             document.querySelectorAll('.content').forEach(col => col.style.display = 'none');
             const selectedColumn = document.getElementById(columnId);
             selectedColumn.style.display = 'block';
-            loadColumnData(columnId);
+            currentColumn = columnId;
+            if (!allData[columnId].length) {
+                loadColumnData(columnId);
+            } else {
+                renderColumn();
+            }
         }
 
         async function loadColumnData(columnId) {
@@ -186,38 +202,90 @@
 
                 const response = await fetch(url);
                 const data = await response.json();
-                let html = "";
-                if (!data || data.length === 0) {
-                    html = `<p class="no-data">${title} йўқ</p>`;
-                } else {
-                    data.forEach(item => {
-                        html += `
-                            <div class="item">
-                                <div class="item-text">
-                                    <p><strong>Рақам:</strong> ${item.unique_id}</p>
-                                    <p><strong>Категория:</strong> ${item.category}</p>
-                                    <p><strong>Тури:</strong> ${item.sort}</p>
-                                    <p><strong>Ҳажм:</strong> ${item.volume_ton} тонна</p>
-                                    <p><strong>Нарх:</strong> ${item.price} сўм</p>
-                        `;
-                        if (columnId === 'requests') {
-                            html += `<p><strong>Вилоят:</strong> ${item.region}</p>`;
-                        }
-                        html += `</div><div class="photo-container">`;
-                        if (columnId !== 'requests' && item.photos) {
-                            const photos = item.photos.split(",");
-                            photos.slice(0, 4).forEach(photo => {
-                                html += `<img class="photo" src="${baseUrl}/photo/${photo}" alt="Маҳсулот расми" onerror="this.style.display='none';">`;
-                            });
-                        }
-                        html += `</div></div>`;
-                    });
-                }
-                document.getElementById(columnId).innerHTML = `<h2>${title}</h2>${html}`;
+                allData[columnId] = data.map(item => ({
+                    ...item,
+                    phone: null // Будет загружено при клике на номер
+                }));
+                renderColumn(title);
             } catch (error) {
                 console.error(`Error loading ${columnId}:`, error);
                 document.getElementById(columnId).innerHTML = `<h2>${title}</h2><p class="no-data">Хатолик юз берди</p>`;
             }
+        }
+
+        async function fetchPhoneNumber(uniqueId) {
+            try {
+                const response = await fetch(`${baseUrl}/all_products`);
+                const products = await response.json();
+                const product = products.find(p => p.unique_id === uniqueId);
+                if (product) {
+                    const userResponse = await fetch(`${baseUrl}/get_user_phone?user_id=${product.user_id}`);
+                    const userData = await userResponse.json();
+                    return userData.phone_number || "Номер не найден";
+                }
+                return "Продукт не найден";
+            } catch (error) {
+                console.error("Error fetching phone:", error);
+                return "Ошибка при загрузке номера";
+            }
+        }
+
+        function renderColumn(title = currentColumn === 'products' ? 'Эълонлар' : currentColumn === 'requests' ? 'Сўровлар' : 'Архив') {
+            const columnId = currentColumn;
+            const data = allData[columnId];
+            let html = "";
+            if (!data || data.length === 0) {
+                html = `<p class="no-data">${title} йўқ</p>`;
+            } else {
+                data.forEach(item => {
+                    html += `
+                        <div class="item">
+                            <div class="item-text">
+                                <p><strong>Рақам:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id}</span></p>
+                                <p><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category}</span></p>
+                                <p><strong>Тури:</strong> <span class="clickable" onclick="filterBy('sort', '${item.sort}')">${item.sort}</span></p>
+                                <p><strong>Ҳажм:</strong> ${item.volume_ton} тонна</p>
+                                <p><strong>Нарх:</strong> ${item.price} сўм</p>
+                                <p><strong>Область:</strong> <span class="clickable" onclick="filterByRegion('${item.user_id}')">${item.region || 'Загрузка...'}</span></p>
+                    `;
+                    if (item.phone) {
+                        html += `<p><strong>Телефон:</strong> ${item.phone}</p>`;
+                    }
+                    if (columnId === 'requests') {
+                        html += `<p><strong>Вилоят:</strong> ${item.region}</p>`;
+                    }
+                    html += `</div><div class="photo-container">`;
+                    if (columnId !== 'requests' && item.photos) {
+                        const photos = item.photos.split(",");
+                        photos.slice(0, 4).forEach(photo => {
+                            html += `<img class="photo" src="${baseUrl}/photo/${photo}" alt="Маҳсулот расми" onerror="this.style.display='none';">`;
+                        });
+                    }
+                    html += `</div></div>`;
+                });
+            }
+            document.getElementById(columnId).innerHTML = `<h2>${title}</h2>${html}`;
+        }
+
+        async function showPhone(uniqueId) {
+            const item = allData[currentColumn].find(i => i.unique_id === uniqueId);
+            if (!item.phone) {
+                item.phone = await fetchPhoneNumber(uniqueId);
+            }
+            renderColumn();
+        }
+
+        function filterBy(field, value) {
+            allData[currentColumn] = allData[currentColumn].filter(item => item[field] === value);
+            renderColumn();
+        }
+
+        async function filterByRegion(userId) {
+            const response = await fetch(`${baseUrl}/all_products`);
+            const allProducts = await response.json();
+            const userRegion = allProducts.find(p => p.user_id === userId)?.region || 'Неизвестно';
+            allData[currentColumn] = allProducts.filter(p => p.region === userRegion);
+            renderColumn();
         }
 
         window.onload = () => {
