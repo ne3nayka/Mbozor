@@ -9,45 +9,84 @@
             font-family: 'Segoe UI', Arial, sans-serif;
             padding: 15px;
             margin: 0;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        body.light {
             background-color: #f0f2f5;
             color: #333;
         }
+        body.dark {
+            background-color: #1c2526;
+            color: #e0e0e0;
+        }
         h1 {
             text-align: center;
-            color: #1a73e8;
             margin-bottom: 20px;
             font-size: 24px;
         }
+        .light h1 { color: #1a73e8; }
+        .dark h1 { color: #4dabf7; }
         .container {
             display: flex;
-            flex-wrap: wrap;
+            flex-direction: column;
+            align-items: center;
             gap: 20px;
+        }
+        .choices {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
             justify-content: center;
         }
-        .column {
-            flex: 1;
-            min-width: 300px;
-            background-color: #fff;
-            border-radius: 10px;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-            padding: 15px;
-            margin: 0;
+        .choice-btn {
+            padding: 12px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.2s;
         }
+        .light .choice-btn {
+            background-color: #28a745;
+            color: white;
+        }
+        .light .choice-btn:hover {
+            background-color: #218838;
+            transform: scale(1.05);
+        }
+        .dark .choice-btn {
+            background-color: #4dabf7;
+            color: #1c2526;
+        }
+        .dark .choice-btn:hover {
+            background-color: #339af0;
+            transform: scale(1.05);
+        }
+        .content {
+            display: none;
+            width: 100%;
+            max-width: 600px;
+            background-color: inherit;
+            border-radius: 10px;
+            padding: 15px;
+        }
+        .light .content { background-color: #fff; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1); }
+        .dark .content { background-color: #2d3839; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3); }
         h2 {
             text-align: center;
-            color: #155724;
             font-size: 20px;
             margin-bottom: 15px;
-            border-bottom: 2px solid #28a745;
-            padding-bottom: 5px;
         }
+        .light h2 { color: #155724; border-bottom: 2px solid #28a745; }
+        .dark h2 { color: #4dabf7; border-bottom: 2px solid #339af0; }
         .item {
-            background-color: #f8f9fa;
             border-radius: 8px;
             padding: 10px;
             margin-bottom: 15px;
             transition: transform 0.2s;
         }
+        .light .item { background-color: #f8f9fa; }
+        .dark .item { background-color: #3b4a4b; }
         .item:hover {
             transform: translateY(-3px);
             box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
@@ -66,29 +105,36 @@
         }
         .no-data {
             text-align: center;
-            color: #666;
             font-style: italic;
         }
-        @media (max-width: 768px) {
-            .column {
-                min-width: 100%;
-            }
+        .light .no-data { color: #666; }
+        .dark .no-data { color: #a0a0a0; }
+        .theme-toggle {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 8px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            border: none;
         }
+        .light .theme-toggle { background-color: #1a73e8; color: white; }
+        .dark .theme-toggle { background-color: #4dabf7; color: #1c2526; }
     </style>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
-<body>
+<body class="light">
+    <button class="theme-toggle" onclick="toggleTheme()">Тёмная тема</button>
     <h1>Эълонлар доскаси</h1>
     <div class="container">
-        <div class="column" id="products">
-            <h2>Эълонлар</h2>
+        <div class="choices">
+            <button class="choice-btn" onclick="showColumn('products')">Эълонлар</button>
+            <button class="choice-btn" onclick="showColumn('requests')">Сўровлар</button>
+            <button class="choice-btn" onclick="showColumn('archive')">Архив</button>
         </div>
-        <div class="column" id="requests">
-            <h2>Сўровлар</h2>
-        </div>
-        <div class="column" id="archive">
-            <h2>Архив</h2>
-        </div>
+        <div class="content" id="products"></div>
+        <div class="content" id="requests"></div>
+        <div class="content" id="archive"></div>
     </div>
 
     <script>
@@ -96,67 +142,46 @@
         tg.ready();
 
         const baseUrl = "https://836c-90-156-164-75.ngrok-free.app";
+        let currentTheme = tg.colorScheme || 'light'; // Берем тему из Telegram
 
-        async function loadData() {
+        // Устанавливаем начальную тему
+        document.body.className = currentTheme;
+
+        function toggleTheme() {
+            currentTheme = currentTheme === 'light' ? 'dark' : 'light';
+            document.body.className = currentTheme;
+            document.querySelector('.theme-toggle').textContent = currentTheme === 'light' ? 'Тёмная тема' : 'Светлая тема';
+        }
+
+        function showColumn(columnId) {
+            document.querySelectorAll('.content').forEach(col => col.style.display = 'none');
+            const selectedColumn = document.getElementById(columnId);
+            selectedColumn.style.display = 'block';
+            loadColumnData(columnId);
+        }
+
+        async function loadColumnData(columnId) {
             try {
-                // Загрузка объявлений
-                const productsResponse = await fetch(`${baseUrl}/all_products`);
-                const products = await productsResponse.json();
-                let productsHtml = "";
-                if (!products || products.length === 0) {
-                    productsHtml = "<p class='no-data'>Эълонлар йўқ</p>";
+                let url, title;
+                if (columnId === 'products') {
+                    url = `${baseUrl}/all_products`;
+                    title = 'Эълонлар';
+                } else if (columnId === 'requests') {
+                    url = `${baseUrl}/all_requests`;
+                    title = 'Сўровлар';
                 } else {
-                    products.forEach(product => {
-                        productsHtml += `
-                            <div class="item">
-                                <p><strong>Рақам:</strong> ${product.unique_id}</p>
-                                <p><strong>Категория:</strong> ${product.category}</p>
-                                <p><strong>Тури:</strong> ${product.sort}</p>
-                                <p><strong>Ҳажм:</strong> ${product.volume_ton} тонна</p>
-                                <p><strong>Нарх:</strong> ${product.price} сўм</p>
-                        `;
-                        if (product.photos) {
-                            const photos = product.photos.split(",");
-                            photos.forEach(photo => {
-                                productsHtml += `<img class="photo" src="${baseUrl}/photo/${photo}" alt="Маҳсулот расми" onerror="this.style.display='none';">`;
-                            });
-                        }
-                        productsHtml += "</div>";
-                    });
+                    url = `${baseUrl}/archive`;
+                    title = 'Архив';
                 }
-                document.getElementById("products").innerHTML = "<h2>Эълонлар</h2>" + productsHtml;
 
-                // Загрузка запросов
-                const requestsResponse = await fetch(`${baseUrl}/all_requests`);
-                const requests = await requestsResponse.json();
-                let requestsHtml = "";
-                if (!requests || requests.length === 0) {
-                    requestsHtml = "<p class='no-data'>Сўровлар йўқ</p>";
+                const response = await fetch(url);
+                const data = await response.json();
+                let html = "";
+                if (!data || data.length === 0) {
+                    html = `<p class="no-data">${title} йўқ</p>`;
                 } else {
-                    requests.forEach(req => {
-                        requestsHtml += `
-                            <div class="item">
-                                <p><strong>Рақам:</strong> ${req.unique_id}</p>
-                                <p><strong>Категория:</strong> ${req.category}</p>
-                                <p><strong>Тури:</strong> ${req.sort}</p>
-                                <p><strong>Ҳажм:</strong> ${req.volume_ton} тонна</p>
-                                <p><strong>Нарх:</strong> ${req.price} сўм</p>
-                                <p><strong>Вилоят:</strong> ${req.region}</p>
-                            </div>
-                        `;
-                    });
-                }
-                document.getElementById("requests").innerHTML = "<h2>Сўровлар</h2>" + requestsHtml;
-
-                // Загрузка архива
-                const archiveResponse = await fetch(`${baseUrl}/archive`);
-                const archive = await archiveResponse.json();
-                let archiveHtml = "";
-                if (!archive || archive.length === 0) {
-                    archiveHtml = "<p class='no-data'>Архив бўш</p>";
-                } else {
-                    archive.forEach(item => {
-                        archiveHtml += `
+                    data.forEach(item => {
+                        html += `
                             <div class="item">
                                 <p><strong>Рақам:</strong> ${item.unique_id}</p>
                                 <p><strong>Категория:</strong> ${item.category}</p>
@@ -164,22 +189,29 @@
                                 <p><strong>Ҳажм:</strong> ${item.volume_ton} тонна</p>
                                 <p><strong>Нарх:</strong> ${item.price} сўм</p>
                         `;
-                        if (item.photos) {
+                        if (columnId !== 'requests' && item.photos) {
                             const photos = item.photos.split(",");
-                            photos.forEach(photo => {
-                                archiveHtml += `<img class="photo" src="${baseUrl}/photo/${photo}" alt="Маҳсулот расми" onerror="this.style.display='none';">`;
+                            photos.slice(0, 4).forEach(photo => { // Ограничение до 4 фото
+                                html += `<img class="photo" src="${baseUrl}/photo/${photo}" alt="Маҳсулот расми" onerror="this.style.display='none';">`;
                             });
                         }
-                        archiveHtml += "</div>";
+                        if (columnId === 'requests') {
+                            html += `<p><strong>Вилоят:</strong> ${item.region}</p>`;
+                        }
+                        html += "</div>";
                     });
                 }
-                document.getElementById("archive").innerHTML = "<h2>Архив</h2>" + archiveHtml;
+                document.getElementById(columnId).innerHTML = `<h2>${title}</h2>${html}`;
             } catch (error) {
-                console.error("Error loading data:", error);
+                console.error(`Error loading ${columnId}:`, error);
+                document.getElementById(columnId).innerHTML = `<h2>${title}</h2><p class="no-data">Хатолик юз берди</p>`;
             }
         }
 
-        window.onload = loadData;
+        // Начальный экран без данных
+        window.onload = () => {
+            document.querySelector('.theme-toggle').textContent = currentTheme === 'light' ? 'Тёмная тема' : 'Светлая тема';
+        };
     </script>
 </body>
 </html>
