@@ -83,6 +83,10 @@
             border-radius: 8px;
             padding: 10px;
             margin-bottom: 15px;
+            display: flex;
+            flex-direction: row;
+            align-items: flex-start;
+            gap: 10px;
             transition: transform 0.2s;
         }
         .light .item { background-color: #f8f9fa; }
@@ -91,17 +95,24 @@
             transform: translateY(-3px);
             box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
         }
-        .item p {
-            margin: 5px 0;
+        .item-text {
+            flex: 1;
+        }
+        .item-text p {
+            margin: 3px 0;
             font-size: 14px;
             line-height: 1.4;
         }
+        .photo-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
         .photo {
-            max-width: 100%;
-            height: auto;
+            width: 100px;  /* Фиксированный размер */
+            height: 100px;
+            object-fit: cover;  /* Обрезка для квадратного формата */
             border-radius: 5px;
-            margin-top: 5px;
-            display: block;
         }
         .no-data {
             text-align: center;
@@ -142,9 +153,8 @@
         tg.ready();
 
         const baseUrl = "https://4f08-90-156-164-75.ngrok-free.app";
-        let currentTheme = tg.colorScheme || 'light'; // Берем тему из Telegram
+        let currentTheme = tg.colorScheme || 'light';
 
-        // Устанавливаем начальную тему
         document.body.className = currentTheme;
 
         function toggleTheme() {
@@ -183,22 +193,24 @@
                     data.forEach(item => {
                         html += `
                             <div class="item">
-                                <p><strong>Рақам:</strong> ${item.unique_id}</p>
-                                <p><strong>Категория:</strong> ${item.category}</p>
-                                <p><strong>Тури:</strong> ${item.sort}</p>
-                                <p><strong>Ҳажм:</strong> ${item.volume_ton} тонна</p>
-                                <p><strong>Нарх:</strong> ${item.price} сўм</p>
+                                <div class="item-text">
+                                    <p><strong>Рақам:</strong> ${item.unique_id}</p>
+                                    <p><strong>Категория:</strong> ${item.category}</p>
+                                    <p><strong>Тури:</strong> ${item.sort}</p>
+                                    <p><strong>Ҳажм:</strong> ${item.volume_ton} тонна</p>
+                                    <p><strong>Нарх:</strong> ${item.price} сўм</p>
                         `;
-                        if (columnId !== 'requests' && item.photos) {
-                            const photos = item.photos.split(",");
-                            photos.slice(0, 4).forEach(photo => { // Ограничение до 4 фото
-                                html += `<img class="photo" src="${baseUrl}/photo/${photo}" alt="Маҳсулот расми" onerror="this.style.display='none';">`;
-                            });
-                        }
                         if (columnId === 'requests') {
                             html += `<p><strong>Вилоят:</strong> ${item.region}</p>`;
                         }
-                        html += "</div>";
+                        html += `</div><div class="photo-container">`;
+                        if (columnId !== 'requests' && item.photos) {
+                            const photos = item.photos.split(",");
+                            photos.slice(0, 4).forEach(photo => {
+                                html += `<img class="photo" src="${baseUrl}/photo/${photo}" alt="Маҳсулот расми" onerror="this.style.display='none';">`;
+                            });
+                        }
+                        html += `</div></div>`;
                     });
                 }
                 document.getElementById(columnId).innerHTML = `<h2>${title}</h2>${html}`;
@@ -208,7 +220,6 @@
             }
         }
 
-        // Начальный экран без данных
         window.onload = () => {
             document.querySelector('.theme-toggle').textContent = currentTheme === 'light' ? 'Тёмная тема' : 'Светлая тема';
         };
