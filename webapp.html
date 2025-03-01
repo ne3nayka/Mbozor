@@ -38,7 +38,7 @@
             gap: 15px;
             justify-content: center;
         }
-        .choice-btn {
+        .choice-btn, .reset-btn {
             padding: 12px 20px;
             font-size: 16px;
             border: none;
@@ -129,7 +129,7 @@
         .light .no-data { color: #666; }
         .dark .no-data { color: #a0a0a0; }
         .theme-toggle, .reset-btn {
-            padding: 8px 15px; /* Уменьшенный размер как у theme-toggle */
+            padding: 8px 15px;
             border-radius: 5px;
             cursor: pointer;
             border: none;
@@ -162,7 +162,7 @@
         const tg = window.Telegram.WebApp;
         tg.ready();
 
-        const baseUrl = "https://4f08-90-156-164-75.ngrok-free.app";
+        const baseUrl = "https://4f08-90-156-164-75.ngrok-free.app"; // Новый адрес ngrok
         let currentTheme = tg.colorScheme || 'light';
         let allData = { products: [], requests: [], archive: [] };
         let originalData = { products: [], requests: [], archive: [] };
@@ -245,7 +245,7 @@
                     html += `</div><div class="item-text">
                                 <p><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id}</span></p>
                                 <p><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category}</span></p>
-                                <p><strong>Тури:</strong> <span class="clickable" onclick="filterBy('sort', '${item.sort}')">${item.sort}</span></p>
+                                <p><strong>Сорти:</strong> <span class="clickable" onclick="filterBy('sort', '${item.sort}')">${item.sort}</span></p>
                                 <p><strong>Ҳажм:</strong> ${item.volume_ton} т</p>
                                 <p><strong>Нарх:</strong> ${item.price} сўм</p>
                                 <p><strong>Область:</strong> <span class="clickable" onclick="filterByRegion('${item.user_id}')">${item.region || 'Загрузка...'}</span></p>`;
