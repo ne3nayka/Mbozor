@@ -38,7 +38,7 @@
             gap: 15px;
             justify-content: center;
         }
-        .choice-btn, .reset-btn {
+        .choice-btn {
             padding: 12px 20px;
             font-size: 16px;
             border: none;
@@ -46,19 +46,19 @@
             cursor: pointer;
             transition: background-color 0.2s, transform 0.2s;
         }
-        .light .choice-btn, .light .reset-btn {
+        .light .choice-btn {
             background-color: #28a745;
             color: white;
         }
-        .light .choice-btn:hover, .light .reset-btn:hover {
+        .light .choice-btn:hover {
             background-color: #218838;
             transform: scale(1.05);
         }
-        .dark .choice-btn, .dark .reset-btn {
+        .dark .choice-btn {
             background-color: #4dabf7;
             color: #1c2526;
         }
-        .dark .choice-btn:hover, .dark .reset-btn:hover {
+        .dark .choice-btn:hover {
             background-color: #339af0;
             transform: scale(1.05);
         }
@@ -128,17 +128,19 @@
         }
         .light .no-data { color: #666; }
         .dark .no-data { color: #a0a0a0; }
-        .theme-toggle {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            padding: 8px 15px;
+        .theme-toggle, .reset-btn {
+            padding: 8px 15px; /* Уменьшенный размер как у theme-toggle */
             border-radius: 5px;
             cursor: pointer;
             border: none;
+            font-size: 14px;
         }
-        .light .theme-toggle { background-color: #1a73e8; color: white; }
-        .dark .theme-toggle { background-color: #4dabf7; color: #1c2526; }
+        .light .theme-toggle, .light .reset-btn { background-color: #1a73e8; color: white; }
+        .dark .theme-toggle, .dark .reset-btn { background-color: #4dabf7; color: #1c2526; }
+        .light .reset-btn:hover { background-color: #1557b0; }
+        .dark .reset-btn:hover { background-color: #339af0; }
+        .theme-toggle { position: fixed; top: 10px; right: 10px; }
+        .reset-btn { margin-bottom: 10px; display: block; width: fit-content; }
     </style>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
@@ -163,7 +165,7 @@
         const baseUrl = "https://4f08-90-156-164-75.ngrok-free.app";
         let currentTheme = tg.colorScheme || 'light';
         let allData = { products: [], requests: [], archive: [] };
-        let originalData = { products: [], requests: [], archive: [] }; // Для сброса фильтров
+        let originalData = { products: [], requests: [], archive: [] };
         let currentColumn = 'products';
 
         document.body.className = currentTheme;
@@ -204,7 +206,7 @@
                 const response = await fetch(url);
                 const data = await response.json();
                 allData[columnId] = data.map(item => ({ ...item, phone: null }));
-                originalData[columnId] = [...data]; // Сохраняем оригинальные данные
+                originalData[columnId] = [...data];
                 renderColumn(title);
             } catch (error) {
                 console.error(`Error loading ${columnId}:`, error);
@@ -216,7 +218,7 @@
             try {
                 const response = await fetch(`${baseUrl}/get_user_phone?user_id=${allData[currentColumn].find(i => i.unique_id === uniqueId).user_id}`);
                 const userData = await response.json();
-                return userData.phone_number || "Номер не найден";
+                return userData.phone_number ? `+${userData.phone_number}` : "Номер не найден";
             } catch (error) {
                 console.error("Error fetching phone:", error);
                 return "Ошибка при загрузке номера";
