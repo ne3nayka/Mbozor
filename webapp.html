@@ -38,7 +38,7 @@
             gap: 15px;
             justify-content: center;
         }
-        .choice-btn {
+        .choice-btn, .reset-btn {
             padding: 12px 20px;
             font-size: 16px;
             border: none;
@@ -46,19 +46,19 @@
             cursor: pointer;
             transition: background-color 0.2s, transform 0.2s;
         }
-        .light .choice-btn {
+        .light .choice-btn, .light .reset-btn {
             background-color: #28a745;
             color: white;
         }
-        .light .choice-btn:hover {
+        .light .choice-btn:hover, .light .reset-btn:hover {
             background-color: #218838;
             transform: scale(1.05);
         }
-        .dark .choice-btn {
+        .dark .choice-btn, .dark .reset-btn {
             background-color: #4dabf7;
             color: #1c2526;
         }
-        .dark .choice-btn:hover {
+        .dark .choice-btn:hover, .dark .reset-btn:hover {
             background-color: #339af0;
             transform: scale(1.05);
         }
@@ -113,7 +113,7 @@
         .dark .clickable:hover { color: #339af0; }
         .photo-container {
             display: flex;
-            flex-wrap: wrap;
+            flex-direction: column;
             gap: 5px;
         }
         .photo {
@@ -151,9 +151,9 @@
             <button class="choice-btn" onclick="showColumn('requests')">Сўровлар</button>
             <button class="choice-btn" onclick="showColumn('archive')">Архив</button>
         </div>
-        <div class="content" id="products"></div>
-        <div class="content" id="requests"></div>
-        <div class="content" id="archive"></div>
+        <div class="content" id="products"><button class="reset-btn" onclick="resetFilter('products')">Отмена фильтра</button></div>
+        <div class="content" id="requests"><button class="reset-btn" onclick="resetFilter('requests')">Отмена фильтра</button></div>
+        <div class="content" id="archive"><button class="reset-btn" onclick="resetFilter('archive')">Отмена фильтра</button></div>
     </div>
 
     <script>
@@ -163,6 +163,7 @@
         const baseUrl = "https://4f08-90-156-164-75.ngrok-free.app";
         let currentTheme = tg.colorScheme || 'light';
         let allData = { products: [], requests: [], archive: [] };
+        let originalData = { products: [], requests: [], archive: [] }; // Для сброса фильтров
         let currentColumn = 'products';
 
         document.body.className = currentTheme;
@@ -171,7 +172,7 @@
             currentTheme = currentTheme === 'light' ? 'dark' : 'light';
             document.body.className = currentTheme;
             document.querySelector('.theme-toggle').textContent = currentTheme === 'light' ? 'Тёмная тема' : 'Светлая тема';
-            renderColumn(); // Перерисовываем текущий столбец с новой темой
+            renderColumn();
         }
 
         function showColumn(columnId) {
@@ -202,10 +203,8 @@
 
                 const response = await fetch(url);
                 const data = await response.json();
-                allData[columnId] = data.map(item => ({
-                    ...item,
-                    phone: null // Будет загружено при клике на номер
-                }));
+                allData[columnId] = data.map(item => ({ ...item, phone: null }));
+                originalData[columnId] = [...data]; // Сохраняем оригинальные данные
                 renderColumn(title);
             } catch (error) {
                 console.error(`Error loading ${columnId}:`, error);
@@ -215,15 +214,9 @@
 
         async function fetchPhoneNumber(uniqueId) {
             try {
-                const response = await fetch(`${baseUrl}/all_products`);
-                const products = await response.json();
-                const product = products.find(p => p.unique_id === uniqueId);
-                if (product) {
-                    const userResponse = await fetch(`${baseUrl}/get_user_phone?user_id=${product.user_id}`);
-                    const userData = await userResponse.json();
-                    return userData.phone_number || "Номер не найден";
-                }
-                return "Продукт не найден";
+                const response = await fetch(`${baseUrl}/get_user_phone?user_id=${allData[currentColumn].find(i => i.unique_id === uniqueId).user_id}`);
+                const userData = await response.json();
+                return userData.phone_number || "Номер не найден";
             } catch (error) {
                 console.error("Error fetching phone:", error);
                 return "Ошибка при загрузке номера";
@@ -233,33 +226,32 @@
         function renderColumn(title = currentColumn === 'products' ? 'Эълонлар' : currentColumn === 'requests' ? 'Сўровлар' : 'Архив') {
             const columnId = currentColumn;
             const data = allData[columnId];
-            let html = "";
+            let html = `<button class="reset-btn" onclick="resetFilter('${columnId}')">Отмена фильтра</button>`;
             if (!data || data.length === 0) {
-                html = `<p class="no-data">${title} йўқ</p>`;
+                html += `<p class="no-data">${title} йўқ</p>`;
             } else {
                 data.forEach(item => {
                     html += `
                         <div class="item">
-                            <div class="item-text">
-                                <p><strong>Рақам:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id}</span></p>
-                                <p><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category}</span></p>
-                                <p><strong>Тури:</strong> <span class="clickable" onclick="filterBy('sort', '${item.sort}')">${item.sort}</span></p>
-                                <p><strong>Ҳажм:</strong> ${item.volume_ton} тонна</p>
-                                <p><strong>Нарх:</strong> ${item.price} сўм</p>
-                                <p><strong>Область:</strong> <span class="clickable" onclick="filterByRegion('${item.user_id}')">${item.region || 'Загрузка...'}</span></p>
-                    `;
-                    if (item.phone) {
-                        html += `<p><strong>Телефон:</strong> ${item.phone}</p>`;
-                    }
-                    if (columnId === 'requests') {
-                        html += `<p><strong>Вилоят:</strong> ${item.region}</p>`;
-                    }
-                    html += `</div><div class="photo-container">`;
+                            <div class="photo-container">`;
                     if (columnId !== 'requests' && item.photos) {
                         const photos = item.photos.split(",");
                         photos.slice(0, 4).forEach(photo => {
                             html += `<img class="photo" src="${baseUrl}/photo/${photo}" alt="Маҳсулот расми" onerror="this.style.display='none';">`;
                         });
+                    }
+                    html += `</div><div class="item-text">
+                                <p><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id}</span></p>
+                                <p><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category}</span></p>
+                                <p><strong>Тури:</strong> <span class="clickable" onclick="filterBy('sort', '${item.sort}')">${item.sort}</span></p>
+                                <p><strong>Ҳажм:</strong> ${item.volume_ton} т</p>
+                                <p><strong>Нарх:</strong> ${item.price} сўм</p>
+                                <p><strong>Область:</strong> <span class="clickable" onclick="filterByRegion('${item.user_id}')">${item.region || 'Загрузка...'}</span></p>`;
+                    if (item.phone) {
+                        html += `<p><strong>Телефон:</strong> ${item.phone}</p>`;
+                    }
+                    if (columnId === 'requests') {
+                        html += `<p><strong>Вилоят:</strong> ${item.region}</p>`;
                     }
                     html += `</div></div>`;
                 });
@@ -281,10 +273,15 @@
         }
 
         async function filterByRegion(userId) {
-            const response = await fetch(`${baseUrl}/all_products`);
-            const allProducts = await response.json();
-            const userRegion = allProducts.find(p => p.user_id === userId)?.region || 'Неизвестно';
-            allData[currentColumn] = allProducts.filter(p => p.region === userRegion);
+            const response = await fetch(`${baseUrl}/${currentColumn === 'products' ? 'all_products' : currentColumn === 'archive' ? 'archive' : 'all_requests'}`);
+            const allItems = await response.json();
+            const userRegion = allItems.find(p => p.user_id === userId)?.region || 'Неизвестно';
+            allData[currentColumn] = allItems.filter(p => p.region === userRegion);
+            renderColumn();
+        }
+
+        function resetFilter(columnId) {
+            allData[columnId] = [...originalData[columnId]];
             renderColumn();
         }
 
