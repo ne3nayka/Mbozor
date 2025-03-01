@@ -32,11 +32,10 @@
         const tg = window.Telegram.WebApp;
         tg.ready();
 
-        const baseUrl = "https://b1da-90-156-164-75.ngrok-free.app"; // Ваш ngrok URL
+        const baseUrl = "https://437d-90-156-164-75.ngrok-free.app"; // Ваш ngrok URL
 
-        // Функция для загрузки данных
         async function loadData() {
-            // Загрузка всех объявлений (менее 48 часов)
+            // Загрузка всех объявлений
             const productsResponse = await fetch(`${baseUrl}/all_products`);
             const products = await productsResponse.json();
             let productsHtml = "";
@@ -113,7 +112,6 @@
             document.getElementById("archive").innerHTML = "<h2>Архив</h2>" + archiveHtml;
         }
 
-        // Загрузка данных при открытии
         window.onload = loadData;
     </script>
 </body>
