@@ -5,158 +5,47 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Эълонлар доскаси</title>
     <style>
-        /* Основные стили */
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
             padding: 15px;
             margin: 0;
             transition: background-color 0.3s, color 0.3s;
         }
-        body.light {
-            background-color: #f0f2f5;
-            color: #333;
-        }
-        body.dark {
-            background-color: #1c2526;
-            color: #e0e0e0;
-        }
-
-        /* Заголовок */
-        h1 {
-            text-align: center;
-            margin-bottom: 20px;
-            font-size: 24px;
-        }
+        body.light { background-color: #f0f2f5; color: #333; }
+        body.dark { background-color: #1c2526; color: #e0e0e0; }
+        h1 { text-align: center; margin-bottom: 20px; font-size: 24px; }
         .light h1 { color: #1a73e8; }
         .dark h1 { color: #4dabf7; }
-
-        /* Контейнер */
-        .container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 20px;
-        }
-
-        /* Кнопки выбора */
-        .choices {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 15px;
-            justify-content: center;
-        }
-        .choice-btn {
-            padding: 12px 20px;
-            font-size: 16px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: background-color 0.2s, transform 0.2s;
-        }
-        .light .choice-btn {
-            background-color: #28a745;
-            color: white;
-        }
-        .light .choice-btn:hover {
-            background-color: #218838;
-            transform: scale(1.05);
-        }
-        .dark .choice-btn {
-            background-color: #4dabf7;
-            color: #1c2526;
-        }
-        .dark .choice-btn:hover {
-            background-color: #339af0;
-            transform: scale(1.05);
-        }
-
-        /* Контент */
-        .content {
-            display: none;
-            width: 100%;
-            max-width: 600px;
-            border-radius: 10px;
-            padding: 15px;
-        }
+        .container { display: flex; flex-direction: column; align-items: center; gap: 20px; }
+        .choices { display: flex; flex-wrap: wrap; gap: 15px; justify-content: center; }
+        .choice-btn { padding: 12px 20px; font-size: 16px; border: none; border-radius: 8px; cursor: pointer; transition: background-color 0.2s, transform 0.2s; }
+        .light .choice-btn { background-color: #28a745; color: white; }
+        .light .choice-btn:hover { background-color: #218838; transform: scale(1.05); }
+        .dark .choice-btn { background-color: #4dabf7; color: #1c2526; }
+        .dark .choice-btn:hover { background-color: #339af0; transform: scale(1.05); }
+        .content { display: none; width: 100%; max-width: 600px; border-radius: 10px; padding: 15px; }
         .light .content { background-color: #fff; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1); }
         .dark .content { background-color: #2d3839; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3); }
-
-        /* Заголовок контента */
-        h2 {
-            text-align: center;
-            font-size: 20px;
-            margin-bottom: 15px;
-        }
+        h2 { text-align: center; font-size: 20px; margin-bottom: 15px; }
         .light h2 { color: #155724; border-bottom: 2px solid #28a745; }
         .dark h2 { color: #4dabf7; border-bottom: 2px solid #339af0; }
-
-        /* Элемент списка */
-        .item {
-            border-radius: 8px;
-            padding: 10px;
-            margin-bottom: 15px;
-            display: flex;
-            flex-direction: row;
-            align-items: flex-start;
-            gap: 10px;
-            transition: transform 0.2s;
-        }
+        .item { border-radius: 8px; padding: 10px; margin-bottom: 15px; display: flex; flex-direction: row; align-items: flex-start; gap: 10px; transition: transform 0.2s; }
         .light .item { background-color: #f8f9fa; }
         .dark .item { background-color: #3b4a4b; }
-        .item:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
-        }
-
-        /* Текст элемента */
-        .item-text {
-            flex: 1;
-        }
-        .item-text p {
-            margin: 3px 0;
-            font-size: 14px;
-            line-height: 1.4;
-        }
-
-        /* Кликабельные элементы */
-        .clickable {
-            cursor: pointer;
-            text-decoration: underline;
-        }
+        .item:hover { transform: translateY(-3px); box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1); }
+        .item-text { flex: 1; }
+        .item-text p { margin: 3px 0; font-size: 14px; line-height: 1.4; }
+        .clickable { cursor: pointer; text-decoration: underline; }
         .light .clickable { color: #1a73e8; }
         .light .clickable:hover { color: #1557b0; }
         .dark .clickable { color: #4dabf7; }
         .dark .clickable:hover { color: #339af0; }
-
-        /* Контейнер для фото */
-        .photo-container {
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-        }
-        .photo {
-            width: 100px;
-            height: 100px;
-            object-fit: cover;
-            border-radius: 5px;
-        }
-
-        /* Сообщение об отсутствии данных */
-        .no-data {
-            text-align: center;
-            font-style: italic;
-        }
+        .photo-container { display: flex; flex-direction: column; gap: 5px; }
+        .photo { width: 100px; height: 100px; object-fit: cover; border-radius: 5px; }
+        .no-data { text-align: center; font-style: italic; }
         .light .no-data { color: #666; }
         .dark .no-data { color: #a0a0a0; }
-
-        /* Кнопки управления */
-        .theme-toggle, .reset-btn {
-            padding: 8px 15px;
-            border-radius: 5px;
-            cursor: pointer;
-            border: none;
-            font-size: 14px;
-        }
+        .theme-toggle, .reset-btn { padding: 8px 15px; border-radius: 5px; cursor: pointer; border: none; font-size: 14px; }
         .light .theme-toggle, .light .reset-btn { background-color: #1a73e8; color: white; }
         .dark .theme-toggle, .dark .reset-btn { background-color: #4dabf7; color: #1c2526; }
         .light .reset-btn:hover { background-color: #1557b0; }
@@ -184,18 +73,15 @@
         const tg = window.Telegram.WebApp;
         tg.ready();
 
-        // Базовый URL для API
-        const baseUrl = "https://b2a1-84-54-90-231.ngrok-free.app"; 
+        const baseUrl = "https://b2a1-84-54-90-231.ngrok-free.app";
         let currentTheme = tg.colorScheme || 'light';
         let allData = { products: [], requests: [], archive: [] };
         let originalData = { products: [], requests: [], archive: [] };
         let currentColumn = 'products';
 
-        // Установка начальной темы
         document.body.className = currentTheme;
         document.querySelector('.theme-toggle').textContent = currentTheme === 'light' ? 'Тёмная тема' : 'Светлая тема';
 
-        // Переключение темы
         function toggleTheme() {
             currentTheme = currentTheme === 'light' ? 'dark' : 'light';
             document.body.className = currentTheme;
@@ -203,7 +89,6 @@
             renderColumn();
         }
 
-        // Показать выбранный столбец
         function showColumn(columnId) {
             document.querySelectorAll('.content').forEach(col => col.style.display = 'none');
             document.getElementById(columnId).style.display = 'block';
@@ -215,25 +100,14 @@
             }
         }
 
-        // Загрузка данных для столбца
         async function loadColumnData(columnId) {
             try {
                 let url, title;
                 switch (columnId) {
-                    case 'products':
-                        url = `${baseUrl}/all_products`;
-                        title = 'Эълонлар';
-                        break;
-                    case 'requests':
-                        url = `${baseUrl}/all_requests`;
-                        title = 'Сўровлар';
-                        break;
-                    case 'archive':
-                        url = `${baseUrl}/archive`;
-                        title = 'Архив';
-                        break;
+                    case 'products': url = `${baseUrl}/all_products`; title = 'Эълонлар'; break;
+                    case 'requests': url = `${baseUrl}/all_requests`; title = 'Сўровлар'; break;
+                    case 'archive': url = `${baseUrl}/archive`; title = 'Архив'; break;
                 }
-
                 const response = await fetch(url);
                 if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
                 const data = await response.json();
@@ -246,7 +120,6 @@
             }
         }
 
-        // Получение номера телефона
         async function fetchPhoneNumber(uniqueId) {
             try {
                 const item = allData[currentColumn].find(i => i.unique_id === uniqueId);
@@ -260,13 +133,17 @@
             }
         }
 
-        // Рендеринг столбца
+        function escapeHtml(text) {
+            const map = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'};
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
+
         function renderColumn(title = currentColumn === 'products' ? 'Эълонлар' : currentColumn === 'requests' ? 'Сўровлар' : 'Архив') {
             const columnId = currentColumn;
             const data = allData[columnId];
-            let html = `<button class="reset-btn" onclick="resetFilter('${columnId}')">Фильтрни бекор қилиш</button>`;
+            let html = `<button class="reset-btn" onclick="resetFilter('${escapeHtml(columnId)}')">Фильтрни бекор қилиш</button>`;
             if (!data || data.length === 0) {
-                html += `<p class="no-data">${title} йўқ</p>`;
+                html += `<p class="no-data">${escapeHtml(title)} йўқ</p>`;
             } else {
                 data.forEach(item => {
                     html += `
@@ -275,26 +152,25 @@
                     if (columnId !== 'requests' && item.photos) {
                         const photos = item.photos.split(",");
                         photos.slice(0, 4).forEach(photo => {
-                            html += `<img class="photo" src="${baseUrl}/photo/${photo}" alt="Маҳсулот расми" onerror="this.style.display='none';">`;
+                            html += `<img class="photo" src="${baseUrl}/photo/${escapeHtml(photo)}" alt="Маҳсулот расми" onerror="this.src='https://via.placeholder.com/100';">`;
                         });
                     }
                     html += `</div><div class="item-text">
-                                <p><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id}</span></p>
-                                <p><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category}</span></p>
-                                <p><strong>Сорти:</strong> <span class="clickable" onclick="filterBy('sort', '${item.sort}')">${item.sort}</span></p>
-                                <p><strong>Ҳажм:</strong> ${item.volume_ton} т</p>
-                                <p><strong>Нарх:</strong> ${item.price} сўм</p>
-                                <p><strong>Вилоят:</strong> <span class="clickable" onclick="filterByRegion('${item.unique_id}')">${item.region || 'Загрузка...'}</span></p>`;
+                                <p><strong>ID:</strong> <span class="clickable" onclick="showPhone('${escapeHtml(item.unique_id)}')">${escapeHtml(item.unique_id)}</span></p>
+                                <p><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${escapeHtml(item.category)}')">${escapeHtml(item.category)}</span></p>
+                                <p><strong>Сорти:</strong> <span class="clickable" onclick="filterBy('sort', '${escapeHtml(item.sort)}')">${escapeHtml(item.sort)}</span></p>
+                                <p><strong>Ҳажм:</strong> ${escapeHtml(String(item.volume_ton))} т</p>
+                                <p><strong>Нарх:</strong> ${escapeHtml(String(item.price))} сўм</p>
+                                <p><strong>Вилоят:</strong> <span class="clickable" onclick="filterByRegion('${escapeHtml(item.unique_id)}')">${escapeHtml(item.region || 'Загрузка...')}</span></p>`;
                     if (item.phone) {
-                        html += `<p><strong>Телефон:</strong> ${item.phone}</p>`;
+                        html += `<p><strong>Телефон:</strong> ${escapeHtml(item.phone)}</p>`;
                     }
                     html += `</div></div>`;
                 });
             }
-            document.getElementById(columnId).innerHTML = `<h2>${title}</h2>${html}`;
+            document.getElementById(columnId).innerHTML = `<h2>${escapeHtml(title)}</h2>${html}`;
         }
 
-        // Показать номер телефона
         async function showPhone(uniqueId) {
             const item = allData[currentColumn].find(i => i.unique_id === uniqueId);
             if (!item.phone) {
@@ -303,35 +179,26 @@
             renderColumn();
         }
 
-        // Фильтрация по полю
         function filterBy(field, value) {
             allData[currentColumn] = allData[currentColumn].filter(item => item[field] === value);
             renderColumn();
         }
 
-        // Фильтрация по региону
         async function filterByRegion(uniqueId) {
             const response = await fetch(`${baseUrl}/${currentColumn === 'products' ? 'all_products' : currentColumn === 'archive' ? 'archive' : 'all_requests'}`);
             const allItems = await response.json();
-            let userRegion;
-            if (currentColumn === 'requests') {
-                userRegion = allItems.find(p => p.unique_id === uniqueId)?.region || 'Неизвестно';
-            } else {
-                userRegion = allItems.find(p => p.unique_id === uniqueId)?.region || 'Неизвестно';
-            }
+            let userRegion = allItems.find(p => p.unique_id === uniqueId)?.region || 'Неизвестно';
             allData[currentColumn] = allItems.filter(p => p.region === userRegion);
             renderColumn();
         }
 
-        // Сброс фильтра
         function resetFilter(columnId) {
             allData[columnId] = [...originalData[columnId]];
             renderColumn();
         }
 
-        // Инициализация при загрузке
         window.onload = () => {
-            showColumn('products'); // Показываем продукты по умолчанию
+            showColumn('products');
         };
     </script>
 </body>
