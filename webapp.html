@@ -90,8 +90,10 @@
         }
 
         function showColumn(columnId) {
+            console.log(`Переключение на колонку: ${columnId}`);
             document.querySelectorAll('.content').forEach(col => col.style.display = 'none');
-            document.getElementById(columnId).style.display = 'block';
+            const contentElement = document.getElementById(columnId);
+            contentElement.style.display = 'block';
             currentColumn = columnId;
             if (!allData[columnId].length) {
                 loadColumnData(columnId);
@@ -108,21 +110,36 @@
                     case 'requests': url = `${baseUrl}/all_requests`; title = 'Сўровлар'; break;
                     case 'archive': url = `${baseUrl}/archive`; title = 'Архив'; break;
                 }
-                const response = await fetch(url);
-                if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
+                console.log(`Загрузка данных для ${columnId} с URL: ${url}`);
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    }
+                });
+                console.log(`Статус ответа для ${columnId}: ${response.status}`);
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP error: ${response.status}, ${errorText}`);
+                }
                 const data = await response.json();
+                console.log(`Полученные данные для ${columnId}:`, data);
                 allData[columnId] = data.map(item => ({ ...item, phone: null }));
                 originalData[columnId] = [...data];
                 renderColumn(title);
             } catch (error) {
                 console.error(`Ошибка загрузки ${columnId}:`, error);
-                document.getElementById(columnId).innerHTML = `<h2>${title}</h2><p class="no-data">Хатолик юз берди: ${error.message}</p>`;
+                const contentElement = document.getElementById(columnId);
+                contentElement.innerHTML = `<h2>${title}</h2><p class="no-data">Хатолик юз берди: ${error.message}</p>`;
+                contentElement.style.display = 'block';
             }
         }
 
         async function fetchPhoneNumber(uniqueId) {
             try {
                 const item = allData[currentColumn].find(i => i.unique_id === uniqueId);
+                console.log(`Запрос телефона для unique_id: ${uniqueId}, user_id: ${item.user_id}`);
                 const response = await fetch(`${baseUrl}/get_user_phone?user_id=${item.user_id}`);
                 if (!response.ok) throw new Error('Ошибка сервера');
                 const userData = await response.json();
@@ -134,8 +151,8 @@
         }
 
         function escapeHtml(text) {
-            const map = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'};
-            return text.replace(/[&<>"']/g, m => map[m]);
+            const map = {'&': '&', '<': '<', '>': '>', '"': '"', "'": '''};
+            return text ? text.toString().replace(/[&<>"']/g, m => map[m]) : '';
         }
 
         function renderColumn(title = currentColumn === 'products' ? 'Эълонлар' : currentColumn === 'requests' ? 'Сўровлар' : 'Архив') {
@@ -168,7 +185,10 @@
                     html += `</div></div>`;
                 });
             }
-            document.getElementById(columnId).innerHTML = `<h2>${escapeHtml(title)}</h2>${html}`;
+            const columnElement = document.getElementById(columnId);
+            console.log(`Рендеринг ${columnId}, данные:`, data);
+            columnElement.innerHTML = `<h2>${escapeHtml(title)}</h2>${html}`;
+            columnElement.style.display = 'block';
         }
 
         async function showPhone(uniqueId) {
@@ -185,11 +205,15 @@
         }
 
         async function filterByRegion(uniqueId) {
-            const response = await fetch(`${baseUrl}/${currentColumn === 'products' ? 'all_products' : currentColumn === 'archive' ? 'archive' : 'all_requests'}`);
-            const allItems = await response.json();
-            let userRegion = allItems.find(p => p.unique_id === uniqueId)?.region || 'Неизвестно';
-            allData[currentColumn] = allItems.filter(p => p.region === userRegion);
-            renderColumn();
+            try {
+                const response = await fetch(`${baseUrl}/${currentColumn === 'products' ? 'all_products' : currentColumn === 'archive' ? 'archive' : 'all_requests'}`);
+                const allItems = await response.json();
+                let userRegion = allItems.find(p => p.unique_id === uniqueId)?.region || 'Неизвестно';
+                allData[currentColumn] = allItems.filter(p => p.region === userRegion);
+                renderColumn();
+            } catch (error) {
+                console.error("Ошибка фильтрации по региону:", error);
+            }
         }
 
         function resetFilter(columnId) {
@@ -198,6 +222,8 @@
         }
 
         window.onload = () => {
+            console.log("Telegram Mini App инициализирован:", tg.initData);
+            tg.expand();
             showColumn('products');
         };
     </script>
