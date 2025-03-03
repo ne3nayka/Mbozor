@@ -134,7 +134,7 @@
         }
 
         function escapeHtml(text) {
-            const map = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'};
+            const map = {'&': '&', '<': '<', '>': '>', '"': '"', "'": '''};
             return text.replace(/[&<>"']/g, m => map[m]);
         }
 
@@ -159,7 +159,7 @@
                                 <p><strong>ID:</strong> <span class="clickable" onclick="showPhone('${escapeHtml(item.unique_id)}')">${escapeHtml(item.unique_id)}</span></p>
                                 <p><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${escapeHtml(item.category)}')">${escapeHtml(item.category)}</span></p>
                                 <p><strong>Сорти:</strong> <span class="clickable" onclick="filterBy('sort', '${escapeHtml(item.sort)}')">${escapeHtml(item.sort)}</span></p>
-                                <p><strong>Ҳажм:</strong> ${escapeHtml(String(item.volume_ton))} т</p>
+                                <p><strong>Ҳажм:</strong> ${escapeHtml(String(item.volume_ton))} тонна</p>
                                 <p><strong>Нарх:</strong> ${escapeHtml(String(item.price))} сўм</p>
                                 <p><strong>Вилоят:</strong> <span class="clickable" onclick="filterByRegion('${escapeHtml(item.unique_id)}')">${escapeHtml(item.region || 'Загрузка...')}</span></p>`;
                     if (item.phone) {
