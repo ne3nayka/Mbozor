@@ -60,9 +60,9 @@
     <h1>Эълонлар доскаси</h1>
     <div class="container">
         <div class="choices">
-            <button class="choice-btn" onclick="showColumn('products')">Эълонлар</button>
-            <button class="choice-btn" onclick="showColumn('requests')">Сўровлар</button>
-            <button class="choice-btn" onclick="showColumn('archive')">Архив</button>
+            <button class="choice-btn" onclick="loadAndShowColumn('products')">Эълонлар</button>
+            <button class="choice-btn" onclick="loadAndShowColumn('requests')">Сўровлар</button>
+            <button class="choice-btn" onclick="loadAndShowColumn('archive')">Архив</button>
         </div>
         <div class="content" id="products"><button class="reset-btn" onclick="resetFilter('products')">Фильтрни бекор қилиш</button></div>
         <div class="content" id="requests"><button class="reset-btn" onclick="resetFilter('requests')">Фильтрни бекор қилиш</button></div>
@@ -89,17 +89,14 @@
             renderColumn();
         }
 
-        function showColumn(columnId) {
-            console.log(`Переключение на колонку: ${columnId}`);
+        async function loadAndShowColumn(columnId) {
+            console.log(`Загрузка и отображение колонки: ${columnId}`);
+            currentColumn = columnId;
             document.querySelectorAll('.content').forEach(col => col.style.display = 'none');
             const contentElement = document.getElementById(columnId);
             contentElement.style.display = 'block';
-            currentColumn = columnId;
-            if (!allData[columnId].length) {
-                loadColumnData(columnId);
-            } else {
-                renderColumn();
-            }
+            await loadColumnData(columnId);
+            renderColumn();
         }
 
         async function loadColumnData(columnId) {
@@ -110,7 +107,7 @@
                     case 'requests': url = `${baseUrl}/all_requests`; title = 'Сўровлар'; break;
                     case 'archive': url = `${baseUrl}/archive`; title = 'Архив'; break;
                 }
-                console.log(`Загрузка данных для ${columnId} с URL: ${url}`);
+                console.log(`Запрос данных для ${columnId} с URL: ${url}`);
                 const response = await fetch(url, {
                     method: 'GET',
                     headers: {
@@ -127,7 +124,6 @@
                 console.log(`Полученные данные для ${columnId}:`, data);
                 allData[columnId] = data.map(item => ({ ...item, phone: null }));
                 originalData[columnId] = [...data];
-                renderColumn(title);
             } catch (error) {
                 console.error(`Ошибка загрузки ${columnId}:`, error);
                 const contentElement = document.getElementById(columnId);
@@ -224,7 +220,7 @@
         window.onload = () => {
             console.log("Telegram Mini App инициализирован:", tg.initData);
             tg.expand();
-            showColumn('products');
+            loadAndShowColumn('products');  // Загружаем сразу при открытии
         };
     </script>
 </body>
