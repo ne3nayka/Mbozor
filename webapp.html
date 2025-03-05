@@ -194,7 +194,9 @@
         document.querySelector('.theme-toggle').textContent = currentTheme === 'light' ? 'Тёмная тема' : 'Светлая тема';
 
         function escapeHtml(unsafe) {
+            if (unsafe === null || unsafe === undefined) return '';
             return unsafe
+                .toString()
                 .replace(/&/g, "&amp;")
                 .replace(/</g, "&lt;")
                 .replace(/>/g, "&gt;")
@@ -213,11 +215,7 @@
             document.querySelectorAll('.content').forEach(col => col.style.display = 'none');
             document.getElementById(columnId).style.display = 'block';
             currentColumn = columnId;
-            if (!allData[columnId].length) {
-                loadColumnData(columnId);
-            } else {
-                renderColumn();
-            }
+            loadColumnData(columnId); // Всегда загружаем свежие данные
         }
 
         async function loadColumnData(columnId) {
@@ -240,7 +238,7 @@
                 const response = await fetch(url);
                 if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
                 const data = await response.json();
-                console.log(`Loaded data for ${columnId}:`, data); // Отладка
+                console.log(`Loaded data for ${columnId}:`, data);
                 allData[columnId] = data.map(item => ({ ...item, phone: null }));
                 originalData[columnId] = [...data];
                 renderColumn(title);
@@ -277,7 +275,7 @@
                             <div class="photo-container">`;
                     if (columnId === 'products' && item.photos) {
                         const photos = item.photos.split(",");
-                        photos.slice(0, 4).forEach(photo => {
+                        photos.forEach(photo => {
                             html += `<img class="photo" src="${baseUrl}/photo/${escapeHtml(photo.trim())}" alt="Маҳсулот расми" onerror="console.error('Ошибка загрузки фото: ${photo}'); this.style.display='none';">`;
                         });
                     }
