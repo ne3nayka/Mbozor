@@ -5,85 +5,185 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Эълонлар доскаси</title>
     <style>
-        body {
-            font-family: 'Segoe UI', Arial, sans-serif;
-            padding: 15px;
+        /* Основные стили */
+        * {
+            box-sizing: border-box;
             margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: 'Roboto', sans-serif;
+            padding: 20px;
             transition: background-color 0.3s, color 0.3s;
+            line-height: 1.6;
         }
-        body.light { background-color: #f0f2f5; color: #333; }
-        body.dark { background-color: #1c2526; color: #e0e0e0; }
+        body.light {
+            background-color: #f5f7fa;
+            color: #2d3748;
+        }
+        body.dark {
+            background-color: #1a202c;
+            color: #e2e8f0;
+        }
 
-        h1 { text-align: center; margin-bottom: 20px; font-size: 24px; }
-        .light h1 { color: #1a73e8; }
-        .dark h1 { color: #4dabf7; }
+        /* Заголовок */
+        h1 {
+            text-align: center;
+            font-size: 28px;
+            margin-bottom: 25px;
+            font-weight: 600;
+        }
+        .light h1 { color: #3182ce; }
+        .dark h1 { color: #63b3ed; }
 
-        .container { display: flex; flex-direction: column; align-items: center; gap: 20px; }
-        .choices { display: flex; flex-wrap: wrap; gap: 15px; justify-content: center; }
+        /* Контейнер */
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
+        }
+
+        /* Кнопки выбора */
+        .choices {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
         .choice-btn {
-            padding: 12px 20px; font-size: 16px; border: none; border-radius: 8px; cursor: pointer;
-            transition: background-color 0.2s, transform 0.2s;
+            padding: 12px 25px;
+            font-size: 16px;
+            font-weight: 500;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: background-color 0.3s, transform 0.2s;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
-        .light .choice-btn { background-color: #28a745; color: white; }
-        .light .choice-btn:hover { background-color: #218838; transform: scale(1.05); }
-        .dark .choice-btn { background-color: #4dabf7; color: #1c2526; }
-        .dark .choice-btn:hover { background-color: #339af0; transform: scale(1.05); }
+        .light .choice-btn {
+            background-color: #48bb78;
+            color: white;
+        }
+        .light .choice-btn:hover {
+            background-color: #38a169;
+            transform: translateY(-2px);
+        }
+        .dark .choice-btn {
+            background-color: #63b3ed;
+            color: #1a202c;
+        }
+        .dark .choice-btn:hover {
+            background-color: #4299e1;
+            transform: translateY(-2px);
+        }
 
+        /* Контент */
         .content {
-            display: none; width: 100%; max-width: 800px; border-radius: 10px; padding: 15px;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            display: none;
+            width: 100%;
+            background-color: inherit;
+            border-radius: 12px;
+            padding: 20px;
         }
-        .light .content { background-color: #fff; }
-        .dark .content { background-color: #2d3839; }
+        .light .content { background-color: #ffffff; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); }
+        .dark .content { background-color: #2d3748; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); }
 
-        h2 { text-align: center; font-size: 20px; margin-bottom: 15px; }
-        .light h2 { color: #155724; border-bottom: 2px solid #28a745; }
-        .dark h2 { color: #4dabf7; border-bottom: 2px solid #339af0; }
-
-        .filters {
-            display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; justify-content: center;
+        /* Заголовок контента */
+        h2 {
+            font-size: 22px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            text-align: center;
         }
-        .filters input {
-            padding: 8px; border-radius: 5px; border: 1px solid #ccc; width: 100px;
-        }
-        .filters button { padding: 8px 15px; border-radius: 5px; cursor: pointer; border: none; }
-        .light .filters button { background-color: #1a73e8; color: white; }
-        .dark .filters button { background-color: #4dabf7; color: #1c2526; }
+        .light h2 { color: #2f855a; border-bottom: 2px solid #48bb78; padding-bottom: 5px; }
+        .dark h2 { color: #63b3ed; border-bottom: 2px solid #4299e1; padding-bottom: 5px; }
 
+        /* Элемент списка */
         .item {
-            border-radius: 8px; padding: 10px; margin-bottom: 15px; display: flex; flex-direction: row;
-            align-items: flex-start; gap: 10px; transition: transform 0.2s;
+            display: flex;
+            flex-direction: row;
+            gap: 15px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 10px;
+            transition: transform 0.2s, box-shadow 0.2s;
         }
-        .light .item { background-color: #f8f9fa; }
-        .dark .item { background-color: #3b4a4b; }
-        .item:hover { transform: translateY(-3px); box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1); }
-
-        .item-text { flex: 1; }
-        .item-text p { margin: 3px 0; font-size: 14px; line-height: 1.4; }
-
-        .clickable { cursor: pointer; text-decoration: underline; }
-        .light .clickable { color: #1a73e8; }
-        .dark .clickable { color: #4dabf7; }
-
-        .photo-container { display: flex; flex-direction: column; gap: 5px; }
-        .photo { width: 100px; height: 100px; object-fit: cover; border-radius: 5px; }
-
-        .no-data { text-align: center; font-style: italic; }
-        .light .no-data { color: #666; }
-        .dark .no-data { color: #a0a0a0; }
-
-        .theme-toggle { position: fixed; top: 10px; right: 10px; padding: 8px 15px; border-radius: 5px; cursor: pointer; border: none; }
-        .light .theme-toggle { background-color: #1a73e8; color: white; }
-        .dark .theme-toggle { background-color: #4dabf7; color: #1c2526; }
-
-        @media (max-width: 600px) {
-            .item { flex-direction: column; }
-            .photo { width: 80px; height: 80px; }
-            .filters input { width: 80px; }
-            h1 { font-size: 20px; }
-            h2 { font-size: 18px; }
+        .light .item { background-color: #edf2f7; }
+        .dark .item { background-color: #4a5568; }
+        .item:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.1);
         }
+
+        /* Текст элемента */
+        .item-text {
+            flex: 1;
+        }
+        .item-text p {
+            margin: 5px 0;
+            font-size: 15px;
+        }
+        .item-text strong {
+            color: inherit;
+            font-weight: 600;
+        }
+
+        /* Кликабельные элементы */
+        .clickable {
+            cursor: pointer;
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+        .light .clickable { color: #3182ce; }
+        .light .clickable:hover { color: #2b6cb0; text-decoration: underline; }
+        .dark .clickable { color: #63b3ed; }
+        .dark .clickable:hover { color: #4299e1; text-decoration: underline; }
+
+        /* Контейнер для фото */
+        .photo-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-width: 120px;
+        }
+        .photo {
+            width: 100%;
+            height: 100px;
+            object-fit: cover;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        /* Сообщение об отсутствии данных */
+        .no-data {
+            text-align: center;
+            font-style: italic;
+            font-size: 16px;
+            padding: 20px;
+        }
+        .light .no-data { color: #718096; }
+        .dark .no-data { color: #a0aec0; }
+
+        /* Кнопки управления */
+        .theme-toggle, .reset-btn {
+            padding: 10px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            border: none;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background-color 0.3s;
+        }
+        .light .theme-toggle, .light .reset-btn { background-color: #3182ce; color: white; }
+        .dark .theme-toggle, .dark .reset-btn { background-color: #63b3ed; color: #1a202c; }
+        .light .theme-toggle:hover, .light .reset-btn:hover { background-color: #2b6cb0; }
+        .dark .theme-toggle:hover, .dark .reset-btn:hover { background-color: #4299e1; }
+        .theme-toggle { position: fixed; top: 15px; right: 15px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); }
+        .reset-btn { display: block; margin: 0 auto 15px; }
     </style>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600&display=swap" rel="stylesheet">
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body class="light">
@@ -95,40 +195,27 @@
             <button class="choice-btn" onclick="showColumn('requests')">Сўровлар</button>
             <button class="choice-btn" onclick="showColumn('archive')">Архив</button>
         </div>
-        <div class="content" id="products">
-            <div class="filters">
-                <input type="number" id="minPrice" placeholder="Мин. нарх">
-                <input type="number" id="maxPrice" placeholder="Макс. нарх">
-                <input type="number" id="minVolume" placeholder="Мин. ҳажм">
-                <input type="number" id="maxVolume" placeholder="Макс. ҳажм">
-                <button onclick="applyFilters()">Фильтрлаш</button>
-                <button onclick="resetFilter('products')">Тозалаш</button>
-            </div>
-        </div>
-        <div class="content" id="requests">
-            <div class="filters">
-                <input type="number" id="minPriceReq" placeholder="Мин. нарх">
-                <input type="number" id="maxPriceReq" placeholder="Макс. нарх">
-                <button onclick="applyFilters()">Фильтрлаш</button>
-                <button onclick="resetFilter('requests')">Тозалаш</button>
-            </div>
-        </div>
-        <div class="content" id="archive"></div>
+        <div class="content" id="products"><button class="reset-btn" onclick="resetFilter('products')">Фильтрни бекор қилиш</button></div>
+        <div class="content" id="requests"><button class="reset-btn" onclick="resetFilter('requests')">Фильтрни бекор қилиш</button></div>
+        <div class="content" id="archive"><button class="reset-btn" onclick="resetFilter('archive')">Фильтрни бекор қилиш</button></div>
     </div>
 
     <script>
         const tg = window.Telegram.WebApp;
         tg.ready();
 
+        // Базовый URL для API
         const baseUrl = "https://f6ad-84-54-90-255.ngrok-free.app";
         let currentTheme = tg.colorScheme || 'light';
         let allData = { products: [], requests: [], archive: [] };
         let originalData = { products: [], requests: [], archive: [] };
         let currentColumn = 'products';
 
+        // Установка начальной темы
         document.body.className = currentTheme;
         document.querySelector('.theme-toggle').textContent = currentTheme === 'light' ? 'Тёмная тема' : 'Светлая тема';
 
+        // Переключение темы
         function toggleTheme() {
             currentTheme = currentTheme === 'light' ? 'dark' : 'light';
             document.body.className = currentTheme;
@@ -136,6 +223,7 @@
             renderColumn();
         }
 
+        // Показать выбранный столбец
         function showColumn(columnId) {
             document.querySelectorAll('.content').forEach(col => col.style.display = 'none');
             document.getElementById(columnId).style.display = 'block';
@@ -147,15 +235,25 @@
             }
         }
 
+        // Загрузка данных для столбца
         async function loadColumnData(columnId) {
-            let url, title;
-            switch (columnId) {
-                case 'products': url = `${baseUrl}/all_products`; title = 'Эълонлар'; break;
-                case 'requests': url = `${baseUrl}/all_requests`; title = 'Сўровлар'; break;
-                case 'archive': url = `${baseUrl}/archive`; title = 'Архив'; break;
-                default: title = 'Неизвестно';
-            }
             try {
+                let url, title;
+                switch (columnId) {
+                    case 'products':
+                        url = `${baseUrl}/all_products`;
+                        title = 'Эълонлар';
+                        break;
+                    case 'requests':
+                        url = `${baseUrl}/all_requests`;
+                        title = 'Сўровлар';
+                        break;
+                    case 'archive':
+                        url = `${baseUrl}/archive`;
+                        title = 'Архив';
+                        break;
+                }
+
                 const response = await fetch(url);
                 if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
                 const data = await response.json();
@@ -163,22 +261,31 @@
                 originalData[columnId] = [...data];
                 renderColumn(title);
             } catch (error) {
-                document.getElementById(columnId).innerHTML = `<h2>${title}</h2><p class="no-data">Хатолик: ${error.message}</p>`;
+                console.error(`Ошибка загрузки ${columnId}:`, error);
+                document.getElementById(columnId).innerHTML = `<h2>${title}</h2><p class="no-data">Хатолик юз берди: ${error.message}</p>`;
             }
         }
 
+        // Получение номера телефона
         async function fetchPhoneNumber(uniqueId) {
-            const item = allData[currentColumn].find(i => i.unique_id === uniqueId);
-            const response = await fetch(`${baseUrl}/get_user_phone?user_id=${item.user_id}`);
-            const userData = await response.json();
-            return userData.phone_number ? `+${userData.phone_number}` : "Номер не найден";
+            try {
+                const item = allData[currentColumn].find(i => i.unique_id === uniqueId);
+                const response = await fetch(`${baseUrl}/get_user_phone?user_id=${item.user_id}`);
+                if (!response.ok) throw new Error('Ошибка сервера');
+                const userData = await response.json();
+                return userData.phone_number ? `+${userData.phone_number}` : "Номер не найден";
+            } catch (error) {
+                console.error("Ошибка получения телефона:", error);
+                return "Хатолик";
+            }
         }
 
+        // Рендеринг столбца
         function renderColumn(title = currentColumn === 'products' ? 'Эълонлар' : currentColumn === 'requests' ? 'Сўровлар' : 'Архив') {
             const columnId = currentColumn;
             const data = allData[columnId];
-            let html = columnId !== 'archive' ? document.querySelector(`#${columnId} .filters`).outerHTML : '';
-            if (!data.length) {
+            let html = `<button class="reset-btn" onclick="resetFilter('${columnId}')">Фильтрни бекор қилиш</button>`;
+            if (!data || data.length === 0) {
                 html += `<p class="no-data">${title} йўқ</p>`;
             } else {
                 data.forEach(item => {
@@ -188,69 +295,64 @@
                     if (columnId !== 'requests' && item.photos) {
                         const photos = item.photos.split(",");
                         photos.slice(0, 4).forEach(photo => {
-                            html += `<img class="photo lazy" data-src="${baseUrl}/photo/${photo}" alt="Маҳсулот расми">`;
+                            html += `<img class="photo" src="${baseUrl}/photo/${photo}" alt="Маҳсулот расми" onerror="this.style.display='none';">`;
                         });
                     }
                     html += `</div><div class="item-text">
                                 <p><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id}</span></p>
                                 <p><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category}</span></p>
-                                <p><strong>Сорти:</strong> ${item.sort}</p>
+                                <p><strong>Сорти:</strong> <span class="clickable" onclick="filterBy('sort', '${item.sort}')">${item.sort}</span></p>
                                 <p><strong>Ҳажм:</strong> ${item.volume_ton} т</p>
                                 <p><strong>Нарх:</strong> ${item.price} сўм</p>
-                                <p><strong>Вилоят:</strong> ${item.region || 'Загрузка...'}</p>`;
-                    if (item.phone) html += `<p><strong>Телефон:</strong> ${item.phone}</p>`;
+                                <p><strong>Вилоят:</strong> <span class="clickable" onclick="filterByRegion('${item.unique_id}')">${item.region || 'Загрузка...'}</span></p>`;
+                    if (item.phone) {
+                        html += `<p><strong>Телефон:</strong> ${item.phone}</p>`;
+                    }
                     html += `</div></div>`;
                 });
             }
             document.getElementById(columnId).innerHTML = `<h2>${title}</h2>${html}`;
-            lazyLoadImages();
         }
 
+        // Показать номер телефона
         async function showPhone(uniqueId) {
             const item = allData[currentColumn].find(i => i.unique_id === uniqueId);
-            if (!item.phone) item.phone = await fetchPhoneNumber(uniqueId);
+            if (!item.phone) {
+                item.phone = await fetchPhoneNumber(uniqueId);
+            }
             renderColumn();
         }
 
+        // Фильтрация по полю
         function filterBy(field, value) {
             allData[currentColumn] = allData[currentColumn].filter(item => item[field] === value);
             renderColumn();
         }
 
-        function applyFilters() {
-            const minPrice = parseFloat(document.getElementById(`minPrice${currentColumn === 'requests' ? 'Req' : ''}`).value) || 0;
-            const maxPrice = parseFloat(document.getElementById(`maxPrice${currentColumn === 'requests' ? 'Req' : ''}`).value) || Infinity;
-            const minVolume = currentColumn === 'products' ? parseFloat(document.getElementById('minVolume').value) || 0 : 0;
-            const maxVolume = currentColumn === 'products' ? parseFloat(document.getElementById('maxVolume').value) || Infinity : Infinity;
-            allData[currentColumn] = originalData[currentColumn].filter(item => 
-                item.price >= minPrice && item.price <= maxPrice &&
-                (currentColumn !== 'requests' ? item.volume_ton >= minVolume && item.volume_ton <= maxVolume : true)
-            );
+        // Фильтрация по региону
+        async function filterByRegion(uniqueId) {
+            const response = await fetch(`${baseUrl}/${currentColumn === 'products' ? 'all_products' : currentColumn === 'archive' ? 'archive' : 'all_requests'}`);
+            const allItems = await response.json();
+            let userRegion;
+            if (currentColumn === 'requests') {
+                userRegion = allItems.find(p => p.unique_id === uniqueId)?.region || 'Неизвестно';
+            } else {
+                userRegion = allItems.find(p => p.unique_id === uniqueId)?.region || 'Неизвестно';
+            }
+            allData[currentColumn] = allItems.filter(p => p.region === userRegion);
             renderColumn();
         }
 
+        // Сброс фильтра
         function resetFilter(columnId) {
             allData[columnId] = [...originalData[columnId]];
-            document.querySelectorAll(`#${columnId} input`).forEach(input => input.value = '');
             renderColumn();
         }
 
-        function lazyLoadImages() {
-            const images = document.querySelectorAll('.lazy');
-            const observer = new IntersectionObserver((entries, observer) => {
-                entries.forEach(entry => {
-                    if (entry.isIntersecting) {
-                        const img = entry.target;
-                        img.src = img.dataset.src;
-                        img.classList.remove('lazy');
-                        observer.unobserve(img);
-                    }
-                });
-            });
-            images.forEach(img => observer.observe(img));
-        }
-
-        window.onload = () => showColumn('products');
+        // Инициализация при загрузке
+        window.onload = () => {
+            showColumn('products'); // Показываем продукты по умолчанию
+        };
     </script>
 </body>
 </html>
