@@ -184,7 +184,7 @@
         const tg = window.Telegram.WebApp;
         tg.ready();
 
-        const baseUrl = tg.initDataUnsafe.start_param || "http://localhost:5001"; // Для тестирования в браузере, замените на NGROK_URL
+        const baseUrl = tg.initDataUnsafe.start_param || "https://f6ad-84-54-90-255.ngrok-free.app"; // Замените на ваш NGROK_URL
         let currentTheme = tg.colorScheme || 'light';
         let allData = { products: [], requests: [], archive: [] };
         let originalData = { products: [], requests: [], archive: [] };
@@ -240,7 +240,7 @@
                 const response = await fetch(url);
                 if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
                 const data = await response.json();
-                console.log(`Loaded data for ${columnId}:`, data); // Отладка данных
+                console.log(`Loaded data for ${columnId}:`, data); // Отладка
                 allData[columnId] = data.map(item => ({ ...item, phone: null }));
                 originalData[columnId] = [...data];
                 renderColumn(title);
@@ -256,7 +256,7 @@
                 const response = await fetch(`${baseUrl}/get_user_phone?user_id=${item.user_id}`);
                 if (!response.ok) throw new Error('Ошибка сервера');
                 const userData = await response.json();
-                console.log(`Phone data for ${uniqueId}:`, userData); // Отладка телефона
+                console.log(`Phone data for ${uniqueId}:`, userData);
                 return userData.phone_number ? `+${userData.phone_number}` : "Номер не найден";
             } catch (error) {
                 console.error("Ошибка получения телефона:", error);
@@ -277,7 +277,6 @@
                             <div class="photo-container">`;
                     if (columnId === 'products' && item.photos) {
                         const photos = item.photos.split(",");
-                        console.log(`Photos for ${item.unique_id}:`, photos); // Отладка фотографий
                         photos.slice(0, 4).forEach(photo => {
                             html += `<img class="photo" src="${baseUrl}/photo/${escapeHtml(photo.trim())}" alt="Маҳсулот расми" onerror="console.error('Ошибка загрузки фото: ${photo}'); this.style.display='none';">`;
                         });
@@ -286,7 +285,7 @@
                                 <p><strong>ID:</strong> <span class="clickable" onclick="showPhone('${escapeHtml(item.unique_id)}')">${escapeHtml(item.unique_id)}</span></p>
                                 <p><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${escapeHtml(item.category)}')">${escapeHtml(item.category)}</span></p>
                                 <p><strong>Сорти:</strong> <span class="clickable" onclick="filterBy('sort', '${escapeHtml(item.sort)}')">${escapeHtml(item.sort)}</span></p>
-                                <p><strong>Ҳажм:</strong> ${escapeHtml(String(item.volume_ton))} т</p>
+                                <p><strong>Ҳажм:</strong> ${escapeHtml(String(item.volume_ton))} тонна</p>
                                 <p><strong>Нарх:</strong> ${escapeHtml(String(item.price))} сўм</p>
                                 <p><strong>Вилоят:</strong> <span class="clickable" onclick="filterByRegion('${escapeHtml(item.unique_id)}')">${escapeHtml(item.region || 'Загрузка...')}</span></p>`;
                     if (item.phone) {
@@ -325,7 +324,7 @@
         }
 
         window.onload = () => {
-            console.log("Base URL:", baseUrl); // Отладка baseUrl
+            console.log("Base URL:", baseUrl);
             showColumn('products');
         };
     </script>
