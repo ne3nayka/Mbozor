@@ -184,7 +184,8 @@
         const tg = window.Telegram.WebApp;
         tg.ready();
 
-        const baseUrl = tg.initDataUnsafe.start_param || "https://f6ad-84-54-90-255.ngrok-free.app"; // Замените на ваш NGROK_URL
+        // Убедитесь, что NGROK_URL совпадает с вашим актуальным URL
+        const baseUrl = tg.initDataUnsafe.start_param || "https://f6ad-84-54-90-255.ngrok-free.app";
         let currentTheme = tg.colorScheme || 'light';
         let allData = { products: [], requests: [], archive: [] };
         let originalData = { products: [], requests: [], archive: [] };
@@ -235,7 +236,8 @@
                         title = 'Архив';
                         break;
                 }
-                const response = await fetch(url);
+                console.log(`Fetching data from: ${url}`);
+                const response = await fetch(url, { cache: 'no-store' }); // Отключаем кэш
                 if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
                 const data = await response.json();
                 console.log(`Loaded data for ${columnId}:`, data);
@@ -252,12 +254,12 @@
             try {
                 const item = allData[currentColumn].find(i => i.unique_id === uniqueId);
                 const response = await fetch(`${baseUrl}/get_user_phone?user_id=${item.user_id}`);
-                if (!response.ok) throw new Error('Ошибка сервера');
+                if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
                 const userData = await response.json();
                 console.log(`Phone data for ${uniqueId}:`, userData);
                 return userData.phone_number ? `+${userData.phone_number}` : "Номер не найден";
             } catch (error) {
-                console.error("Ошибка получения телефона:", error);
+                console.error(`Ошибка получения телефона для ${uniqueId}:`, error);
                 return "Хатолик";
             }
         }
@@ -275,11 +277,15 @@
                             <div class="photo-container">`;
                     if (columnId === 'products' && item.photos) {
                         const photos = item.photos.split(",");
-                        photos.forEach(photo => {
-                            html += `<img class="photo" src="${baseUrl}/photo/${escapeHtml(photo.trim())}" alt="Маҳсулот расми" onerror="console.error('Ошибка загрузки фото: ${photo}'); this.style.display='none';">`;
+                        console.log(`Rendering photos for ${item.unique_id}:`, photos);
+                        photos.forEach((photo, index) => {
+                            const photoUrl = `${baseUrl}/photo/${escapeHtml(photo.trim())}`;
+                            console.log(`Photo ${index + 1} URL: ${photoUrl}`);
+                            html += `<img class="photo" src="${photoUrl}" alt="Маҳсулот расми ${index + 1}" onerror="console.error('Failed to load photo: ${photoUrl}'); this.style.display='none';">`;
                         });
                     }
-                    html += `</div><div class="item-text">
+                    html += `</div>
+                            <div class="item-text">
                                 <p><strong>ID:</strong> <span class="clickable" onclick="showPhone('${escapeHtml(item.unique_id)}')">${escapeHtml(item.unique_id)}</span></p>
                                 <p><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${escapeHtml(item.category)}')">${escapeHtml(item.category)}</span></p>
                                 <p><strong>Сорти:</strong> <span class="clickable" onclick="filterBy('sort', '${escapeHtml(item.sort)}')">${escapeHtml(item.sort)}</span></p>
@@ -309,11 +315,16 @@
         }
 
         async function filterByRegion(uniqueId) {
-            const response = await fetch(`${baseUrl}/${currentColumn === 'products' ? 'all_products' : currentColumn === 'archive' ? 'archive' : 'all_requests'}`);
-            const allItems = await response.json();
-            let userRegion = allItems.find(p => p.unique_id === uniqueId)?.region || 'Неизвестно';
-            allData[currentColumn] = allItems.filter(p => p.region === userRegion);
-            renderColumn();
+            try {
+                const response = await fetch(`${baseUrl}/${currentColumn === 'products' ? 'all_products' : currentColumn === 'archive' ? 'archive' : 'all_requests'}`, { cache: 'no-store' });
+                if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
+                const allItems = await response.json();
+                const userRegion = allItems.find(p => p.unique_id === uniqueId)?.region || 'Неизвестно';
+                allData[currentColumn] = allItems.filter(p => p.region === userRegion);
+                renderColumn();
+            } catch (error) {
+                console.error(`Ошибка фильтрации по региону:`, error);
+            }
         }
 
         function resetFilter(columnId) {
@@ -322,7 +333,7 @@
         }
 
         window.onload = () => {
-            console.log("Base URL:", baseUrl);
+            console.log("Base URL initialized:", baseUrl);
             showColumn('products');
         };
     </script>
