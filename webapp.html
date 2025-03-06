@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Эълонлар доскаси</title>
     <style>
+        /* Основные стили */
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
             padding: 15px;
@@ -19,6 +20,8 @@
             background-color: #1c2526;
             color: #e0e0e0;
         }
+
+        /* Заголовок */
         h1 {
             text-align: center;
             margin-bottom: 20px;
@@ -26,12 +29,16 @@
         }
         .light h1 { color: #1a73e8; }
         .dark h1 { color: #4dabf7; }
+
+        /* Контейнер */
         .container {
             display: flex;
             flex-direction: column;
             align-items: center;
             gap: 20px;
         }
+
+        /* Кнопки выбора */
         .choices {
             display: flex;
             flex-wrap: wrap;
@@ -62,6 +69,8 @@
             background-color: #339af0;
             transform: scale(1.05);
         }
+
+        /* Контент */
         .content {
             display: none;
             width: 100%;
@@ -71,6 +80,8 @@
         }
         .light .content { background-color: #fff; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1); }
         .dark .content { background-color: #2d3839; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3); }
+
+        /* Заголовок контента */
         h2 {
             text-align: center;
             font-size: 20px;
@@ -78,6 +89,8 @@
         }
         .light h2 { color: #155724; border-bottom: 2px solid #28a745; }
         .dark h2 { color: #4dabf7; border-bottom: 2px solid #339af0; }
+
+        /* Элемент списка */
         .item {
             border-radius: 8px;
             padding: 10px;
@@ -94,6 +107,8 @@
             transform: translateY(-3px);
             box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
         }
+
+        /* Текст элемента */
         .item-text {
             flex: 1;
         }
@@ -102,6 +117,8 @@
             font-size: 14px;
             line-height: 1.4;
         }
+
+        /* Кликабельные элементы */
         .clickable {
             cursor: pointer;
             text-decoration: underline;
@@ -110,6 +127,8 @@
         .light .clickable:hover { color: #1557b0; }
         .dark .clickable { color: #4dabf7; }
         .dark .clickable:hover { color: #339af0; }
+
+        /* Контейнер для фото */
         .photo-container {
             display: flex;
             flex-direction: column;
@@ -121,12 +140,16 @@
             object-fit: cover;
             border-radius: 5px;
         }
+
+        /* Сообщение об отсутствии данных */
         .no-data {
             text-align: center;
             font-style: italic;
         }
         .light .no-data { color: #666; }
         .dark .no-data { color: #a0a0a0; }
+
+        /* Кнопки управления */
         .theme-toggle, .reset-btn {
             padding: 8px 15px;
             border-radius: 5px;
@@ -161,9 +184,8 @@
         const tg = window.Telegram.WebApp;
         tg.ready();
 
-        // Базовый URL для API (замените на ваш реальный сервер)
-        const baseUrl = "https://1427-213-206-61-103.ngrok-free.app";
- // Измените на актуальный URL сервера
+        // Базовый URL для API
+        const baseUrl = "https://53e8-213-206-61-103.ngrok-free.app";
         let currentTheme = tg.colorScheme || 'light';
         let allData = { products: [], requests: [], archive: [] };
         let originalData = { products: [], requests: [], archive: [] };
@@ -199,33 +221,24 @@
                 let url, title;
                 switch (columnId) {
                     case 'products':
-                        url = `${baseUrl}/products`;
+                        url = `${baseUrl}/all_products`;
                         title = 'Эълонлар';
                         break;
                     case 'requests':
-                        url = `${baseUrl}/requests`;
+                        url = `${baseUrl}/all_requests`;
                         title = 'Сўровлар';
                         break;
                     case 'archive':
-                        // Пока используем продукты, но фильтруем по статусу 'closed' (дополним API позже)
-                        url = `${baseUrl}/products`;
+                        url = `${baseUrl}/archive`;
                         title = 'Архив';
                         break;
                 }
 
                 const response = await fetch(url);
                 if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
-                let data = await response.json();
-                if (columnId === 'archive') {
-                    data = []; // Заглушка, так как нет эндпоинта для архива
-                    console.warn("Архив пока не реализован в API");
-                }
-                allData[columnId] = data.map(item => ({
-                    ...item,
-                    phone: null, // Добавляем поле для телефона
-                    user_id: columnId === 'products' ? item.seller_id : item.buyer_id
-                }));
-                originalData[columnId] = [...allData[columnId]];
+                const data = await response.json();
+                allData[columnId] = data.map(item => ({ ...item, phone: null }));
+                originalData[columnId] = [...data];
                 renderColumn(title);
             } catch (error) {
                 console.error(`Ошибка загрузки ${columnId}:`, error);
@@ -233,12 +246,18 @@
             }
         }
 
-        // Получение номера телефона (заглушка, пока нет эндпоинта)
+        // Получение номера телефона
         async function fetchPhoneNumber(uniqueId) {
-            const item = allData[currentColumn].find(i => i.unique_id === uniqueId);
-            // В будущем добавим эндпоинт /get_user_phone
-            console.warn("Эндпоинт для телефона не реализован");
-            return "Телефон пока недоступен";
+            try {
+                const item = allData[currentColumn].find(i => i.unique_id === uniqueId);
+                const response = await fetch(`${baseUrl}/get_user_phone?user_id=${item.user_id}`);
+                if (!response.ok) throw new Error('Ошибка сервера');
+                const userData = await response.json();
+                return userData.phone_number ? `+${userData.phone_number}` : "Номер не найден";
+            } catch (error) {
+                console.error("Ошибка получения телефона:", error);
+                return "Хатолик";
+            }
         }
 
         // Рендеринг столбца
@@ -253,22 +272,19 @@
                     html += `
                         <div class="item">
                             <div class="photo-container">`;
-                    if (columnId === 'products' && item.photos) {
-                        item.photos.slice(0, 4).forEach(photo => {
-                            // Заглушка для фото, пока нет эндпоинта
-                            html += `<img class="photo" src="${photo}" alt="Маҳсулот расми" onerror="this.style.display='none';">`;
+                    if (columnId !== 'requests' && item.photos) {
+                        const photos = item.photos.split(",");
+                        photos.slice(0, 4).forEach(photo => {
+                            html += `<img class="photo" src="${baseUrl}/photo/${photo}" alt="Маҳсулот расми" onerror="this.style.display='none';">`;
                         });
                     }
-                    html += `</div>
-                            <div class="item-text">
+                    html += `</div><div class="item-text">
                                 <p><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id}</span></p>
                                 <p><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category}</span></p>
                                 <p><strong>Сорти:</strong> <span class="clickable" onclick="filterBy('sort', '${item.sort}')">${item.sort}</span></p>
                                 <p><strong>Ҳажм:</strong> ${item.volume_ton} т</p>
-                                <p><strong>Нарх:</strong> ${item.price} сўм</p>`;
-                    if (columnId === 'requests') {
-                        html += `<p><strong>Вилоят:</strong> <span class="clickable" onclick="filterByRegion('${item.region}')">${item.region}</span></p>`;
-                    }
+                                <p><strong>Нарх:</strong> ${item.price} сўм</p>
+                                <p><strong>Вилоят:</strong> <span class="clickable" onclick="filterByRegion('${item.unique_id}')">${item.region || 'Загрузка...'}</span></p>`;
                     if (item.phone) {
                         html += `<p><strong>Телефон:</strong> ${item.phone}</p>`;
                     }
@@ -293,9 +309,17 @@
             renderColumn();
         }
 
-        // Фильтрация по региону (только для запросов)
-        function filterByRegion(region) {
-            allData[currentColumn] = allData[currentColumn].filter(item => item.region === region);
+        // Фильтрация по региону
+        async function filterByRegion(uniqueId) {
+            const response = await fetch(`${baseUrl}/${currentColumn === 'products' ? 'all_products' : currentColumn === 'archive' ? 'archive' : 'all_requests'}`);
+            const allItems = await response.json();
+            let userRegion;
+            if (currentColumn === 'requests') {
+                userRegion = allItems.find(p => p.unique_id === uniqueId)?.region || 'Неизвестно';
+            } else {
+                userRegion = allItems.find(p => p.unique_id === uniqueId)?.region || 'Неизвестно';
+            }
+            allData[currentColumn] = allItems.filter(p => p.region === userRegion);
             renderColumn();
         }
 
