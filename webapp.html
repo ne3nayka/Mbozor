@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Эълонлар ва Сўровлар Доскаси</title>
+    <title>Эълонлар доскаси</title>
     <style>
         /* Основные стили */
         body {
@@ -12,100 +12,186 @@
             margin: 0;
             transition: background-color 0.3s, color 0.3s;
         }
-        body.light { background-color: #f0f2f5; color: #333; }
-        body.dark { background-color: #1c2526; color: #e0e0e0; }
-        h1 { text-align: center; margin-bottom: 20px; font-size: 24px; }
+        body.light {
+            background-color: #f0f2f5;
+            color: #333;
+        }
+        body.dark {
+            background-color: #1c2526;
+            color: #e0e0e0;
+        }
+
+        /* Заголовок */
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 24px;
+        }
         .light h1 { color: #1a73e8; }
         .dark h1 { color: #4dabf7; }
 
-        /* Контейнеры */
-        .container { display: flex; flex-direction: column; align-items: center; gap: 20px; }
-        .choices { display: flex; flex-wrap: wrap; gap: 15px; justify-content: center; }
-        .content { display: none; width: 100%; max-width: 600px; padding: 15px; border-radius: 10px; }
-        .light .content { background-color: #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        .dark .content { background-color: #2d3839; box-shadow: 0 2px 5px rgba(0,0,0,0.3); }
-
-        /* Кнопки */
-        .choice-btn, .theme-toggle, .load-more-btn, .reset-btn {
-            padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; transition: all 0.2s;
+        /* Контейнер */
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
         }
-        .light .choice-btn { background-color: #28a745; color: white; }
-        .light .choice-btn:hover { background-color: #218838; transform: scale(1.05); }
-        .dark .choice-btn { background-color: #4dabf7; color: #1c2526; }
-        .dark .choice-btn:hover { background-color: #339af0; transform: scale(1.05); }
-        .theme-toggle { position: fixed; top: 10px; right: 10px; }
-        .light .theme-toggle { background-color: #1a73e8; color: white; }
-        .dark .theme-toggle { background-color: #4dabf7; color: #1c2526; }
-        .load-more-btn, .reset-btn { display: block; margin: 10px auto; }
-        .light .load-more-btn, .light .reset-btn { background-color: #1a73e8; color: white; }
-        .dark .load-more-btn, .dark .reset-btn { background-color: #4dabf7; color: #1c2526; }
 
-        /* Элементы */
-        h2 { text-align: center; font-size: 20px; margin-bottom: 15px; }
+        /* Кнопки выбора */
+        .choices {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            justify-content: center;
+        }
+        .choice-btn {
+            padding: 12px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.2s;
+        }
+        .light .choice-btn {
+            background-color: #28a745;
+            color: white;
+        }
+        .light .choice-btn:hover {
+            background-color: #218838;
+            transform: scale(1.05);
+        }
+        .dark .choice-btn {
+            background-color: #4dabf7;
+            color: #1c2526;
+        }
+        .dark .choice-btn:hover {
+            background-color: #339af0;
+            transform: scale(1.05);
+        }
+
+        /* Контент */
+        .content {
+            display: none;
+            width: 100%;
+            max-width: 600px;
+            border-radius: 10px;
+            padding: 15px;
+        }
+        .light .content { background-color: #fff; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1); }
+        .dark .content { background-color: #2d3839; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3); }
+
+        /* Заголовок контента */
+        h2 {
+            text-align: center;
+            font-size: 20px;
+            margin-bottom: 15px;
+        }
         .light h2 { color: #155724; border-bottom: 2px solid #28a745; }
         .dark h2 { color: #4dabf7; border-bottom: 2px solid #339af0; }
+
+        /* Элемент списка */
         .item {
-            padding: 10px; margin-bottom: 15px; border-radius: 8px; display: flex; gap: 10px;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: row;
+            align-items: flex-start;
+            gap: 10px;
             transition: transform 0.2s;
         }
         .light .item { background-color: #f8f9fa; }
         .dark .item { background-color: #3b4a4b; }
-        .item:hover { transform: translateY(-3px); box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        .item-text { flex: 1; }
-        .item-text p { margin: 5px 0; font-size: 14px; line-height: 1.4; }
-        .clickable { cursor: pointer; text-decoration: underline; }
+        .item:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Текст элемента */
+        .item-text {
+            flex: 1;
+        }
+        .item-text p {
+            margin: 3px 0;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        /* Кликабельные элементы */
+        .clickable {
+            cursor: pointer;
+            text-decoration: underline;
+        }
         .light .clickable { color: #1a73e8; }
         .light .clickable:hover { color: #1557b0; }
         .dark .clickable { color: #4dabf7; }
         .dark .clickable:hover { color: #339af0; }
-        .photo { width: 100px; height: 100px; object-fit: cover; border-radius: 5px; }
-        .no-data { text-align: center; font-style: italic; color: #666; }
+
+        /* Контейнер для фото */
+        .photo-container {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .photo {
+            width: 100px;
+            height: 100px;
+            object-fit: cover;
+            border-radius: 5px;
+        }
+
+        /* Сообщение об отсутствии данных */
+        .no-data {
+            text-align: center;
+            font-style: italic;
+        }
+        .light .no-data { color: #666; }
         .dark .no-data { color: #a0a0a0; }
 
-        /* Поиск */
-        .search-container { width: 100%; max-width: 600px; margin-bottom: 20px; }
-        .search-input {
-            width: 100%; padding: 10px; border-radius: 5px; border: 1px solid #ccc;
-            font-size: 14px; box-sizing: border-box;
+        /* Кнопки управления */
+        .theme-toggle, .reset-btn {
+            padding: 8px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            border: none;
+            font-size: 14px;
         }
-        .light .search-input { background-color: #fff; color: #333; }
-        .dark .search-input { background-color: #3b4a4b; color: #e0e0e0; border-color: #555; }
+        .light .theme-toggle, .light .reset-btn { background-color: #1a73e8; color: white; }
+        .dark .theme-toggle, .dark .reset-btn { background-color: #4dabf7; color: #1c2526; }
+        .light .reset-btn:hover { background-color: #1557b0; }
+        .dark .reset-btn:hover { background-color: #339af0; }
+        .theme-toggle { position: fixed; top: 10px; right: 10px; }
+        .reset-btn { margin-bottom: 10px; display: block; width: fit-content; }
     </style>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body class="light">
     <button class="theme-toggle" onclick="toggleTheme()">Тёмная тема</button>
-    <h1>Эълонлар ва Сўровлар Доскаси</h1>
+    <h1>Эълонлар доскаси</h1>
     <div class="container">
-        <div class="search-container">
-            <input type="text" class="search-input" placeholder="Қидириш (ID, категория, сорт)..." oninput="searchItems()">
-        </div>
         <div class="choices">
             <button class="choice-btn" onclick="showColumn('products')">Эълонлар</button>
             <button class="choice-btn" onclick="showColumn('requests')">Сўровлар</button>
             <button class="choice-btn" onclick="showColumn('archive')">Архив</button>
-            <button class="choice-btn" onclick="showColumn('reviews')">Шарҳлар</button>
         </div>
-        <div class="content" id="products"></div>
-        <div class="content" id="requests"></div>
-        <div class="content" id="archive"></div>
-        <div class="content" id="reviews"></div>
+        <div class="content" id="products"><button class="reset-btn" onclick="resetFilter('products')">Фильтрни бекор қилиш</button></div>
+        <div class="content" id="requests"><button class="reset-btn" onclick="resetFilter('requests')">Фильтрни бекор қилиш</button></div>
+        <div class="content" id="archive"><button class="reset-btn" onclick="resetFilter('archive')">Фильтрни бекор қилиш</button></div>
     </div>
 
     <script>
         const tg = window.Telegram.WebApp;
         tg.ready();
 
-        // Конфигурация
-        const baseUrl = tg.initDataUnsafe?.start_param || "https://b5f8-213-206-61-103.ngrok-free.app";
+        // Базовый URL для API
+        const baseUrl = "https://9f14-213-206-61-103.ngrok-free.app";
         let currentTheme = tg.colorScheme || 'light';
+        let allData = { products: [], requests: [], archive: [] };
+        let originalData = { products: [], requests: [], archive: [] };
         let currentColumn = 'products';
-        let allData = { products: [], requests: [], archive: [], reviews: [] };
-        const limit = 10; // Элементов на страницу
-        let offset = { products: 0, requests: 0, archive: 0, reviews: 0 };
-        let searchQuery = '';
 
-        // Установка темы
+        // Установка начальной темы
         document.body.className = currentTheme;
         document.querySelector('.theme-toggle').textContent = currentTheme === 'light' ? 'Тёмная тема' : 'Светлая тема';
 
@@ -117,135 +203,135 @@
             renderColumn();
         }
 
-        // Показать столбец
+        // Показать выбранный столбец
         function showColumn(columnId) {
             document.querySelectorAll('.content').forEach(col => col.style.display = 'none');
             document.getElementById(columnId).style.display = 'block';
             currentColumn = columnId;
-            offset[columnId] = 0;
-            searchQuery = '';
-            document.querySelector('.search-input').value = '';
-            loadColumnData(columnId);
+            if (!allData[columnId].length) {
+                loadColumnData(columnId);
+            } else {
+                renderColumn();
+            }
         }
 
-        // Загрузка данных с сервера
-        async function loadColumnData(columnId, append = false) {
-            let url, title;
-            switch (columnId) {
-                case 'products': url = `${baseUrl}/all_products`; title = 'Эълонлар'; break;
-                case 'requests': url = `${baseUrl}/all_requests`; title = 'Сўровлар'; break;
-                case 'archive': url = `${baseUrl}/archive`; title = 'Архив'; break;
-                case 'reviews': url = `${baseUrl}/reviews`; title = 'Шарҳлар'; break;
-            }
+        // Загрузка данных для столбца
+        async function loadColumnData(columnId) {
             try {
-                const response = await fetch(`${url}?limit=${limit}&offset=${offset[columnId]}`, {
-                    headers: { "X-Telegram-Init-Data": tg.initData }
-                });
-                if (!response.ok) throw new Error(`HTTP ошибка: ${response.status}`);
-                const data = await response.json();
-                if (append) {
-                    allData[columnId].push(...data);
-                } else {
-                    allData[columnId] = data;
+                let url, title;
+                switch (columnId) {
+                    case 'products':
+                        url = `${baseUrl}/all_products`;
+                        title = 'Эълонлар';
+                        break;
+                    case 'requests':
+                        url = `${baseUrl}/all_requests`;
+                        title = 'Сўровлар';
+                        break;
+                    case 'archive':
+                        url = `${baseUrl}/archive`;
+                        title = 'Архив';
+                        break;
                 }
+
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
+                const data = await response.json();
+                allData[columnId] = data.map(item => ({ ...item, phone: null }));
+                originalData[columnId] = [...data];
                 renderColumn(title);
             } catch (error) {
                 console.error(`Ошибка загрузки ${columnId}:`, error);
-                document.getElementById(columnId).innerHTML = `<h2>${title}</h2><p class="no-data">Хатолик: ${error.message}</p>`;
+                document.getElementById(columnId).innerHTML = `<h2>${title}</h2><p class="no-data">Хатолик юз берди: ${error.message}</p>`;
+            }
+        }
+
+        // Получение номера телефона
+        async function fetchPhoneNumber(uniqueId) {
+            try {
+                const item = allData[currentColumn].find(i => i.unique_id === uniqueId);
+                const response = await fetch(`${baseUrl}/get_user_phone?user_id=${item.user_id}`);
+                if (!response.ok) throw new Error('Ошибка сервера');
+                const userData = await response.json();
+                return userData.phone_number ? `+${userData.phone_number}` : "Номер не найден";
+            } catch (error) {
+                console.error("Ошибка получения телефона:", error);
+                return "Хатолик";
             }
         }
 
         // Рендеринг столбца
-        function renderColumn(title = currentColumn.charAt(0).toUpperCase() + currentColumn.slice(1)) {
+        function renderColumn(title = currentColumn === 'products' ? 'Эълонлар' : currentColumn === 'requests' ? 'Сўровлар' : 'Архив') {
             const columnId = currentColumn;
-            const data = allData[columnId].filter(item => filterItem(item));
-            let html = `<h2>${title}</h2>`;
-            if (!data.length) {
-                html += '<p class="no-data">Маълумот йўқ</p>';
+            const data = allData[columnId];
+            let html = `<button class="reset-btn" onclick="resetFilter('${columnId}')">Фильтрни бекор қилиш</button>`;
+            if (!data || data.length === 0) {
+                html += `<p class="no-data">${title} йўқ</p>`;
             } else {
                 data.forEach(item => {
-                    html += '<div class="item">';
-                    if (columnId === 'products' || columnId === 'archive') {
-                        html += `<img class="photo" src="${baseUrl}/photo/${item.photos?.split(',')[0]}" alt="Расм" onerror="this.src='placeholder.jpg';">`;
+                    html += `
+                        <div class="item">
+                            <div class="photo-container">`;
+                    if (columnId !== 'requests' && item.photos) {
+                        const photos = item.photos.split(",");
+                        photos.slice(0, 4).forEach(photo => {
+                            html += `<img class="photo" src="${baseUrl}/photo/${photo}" alt="Маҳсулот расми" onerror="this.style.display='none';">`;
+                        });
                     }
-                    html += '<div class="item-text">';
-                    if (columnId === 'reviews') {
-                        html += `
-                            <p><strong>Сотувчи ID:</strong> <span class="clickable" onclick="showSellerDetails(${item.seller_id})">${item.seller_id}</span></p>
-                            <p><strong>Баҳо:</strong> ${item.rating}</p>
-                            <p><strong>Изоҳ:</strong> ${item.comment || 'Йўқ'}</p>
-                        `;
-                    } else {
-                        html += `
-                            <p><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id}</span></p>
-                            <p><strong>Категория:</strong> ${item.category}</p>
-                            <p><strong>Сорт:</strong> ${item.sort}</p>
-                            <p><strong>Ҳажм:</strong> ${item.volume_ton} т</p>
-                            <p><strong>Нарх:</strong> ${item.price} сўм</p>
-                            <p><strong>Вилоят:</strong> ${item.region || 'Бутун Ўзбекистон'}</p>
-                        `;
-                        if (item.phone) html += `<p><strong>Телефон:</strong> ${item.phone}</p>`;
+                    html += `</div><div class="item-text">
+                                <p><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id}</span></p>
+                                <p><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category}</span></p>
+                                <p><strong>Сорти:</strong> <span class="clickable" onclick="filterBy('sort', '${item.sort}')">${item.sort}</span></p>
+                                <p><strong>Ҳажм:</strong> ${item.volume_ton} т</p>
+                                <p><strong>Нарх:</strong> ${item.price} сўм</p>
+                                <p><strong>Вилоят:</strong> <span class="clickable" onclick="filterByRegion('${item.unique_id}')">${item.region || 'Загрузка...'}</span></p>`;
+                    if (item.phone) {
+                        html += `<p><strong>Телефон:</strong> ${item.phone}</p>`;
                     }
-                    html += '</div></div>';
+                    html += `</div></div>`;
                 });
-                if (data.length >= offset[columnId] + limit) {
-                    html += `<button class="load-more-btn" onclick="loadMore('${columnId}')">Яна юклаш</button>`;
-                }
             }
-            document.getElementById(columnId).innerHTML = html;
-        }
-
-        // Загрузка следующей страницы
-        function loadMore(columnId) {
-            offset[columnId] += limit;
-            loadColumnData(columnId, true);
+            document.getElementById(columnId).innerHTML = `<h2>${title}</h2>${html}`;
         }
 
         // Показать номер телефона
         async function showPhone(uniqueId) {
             const item = allData[currentColumn].find(i => i.unique_id === uniqueId);
             if (!item.phone) {
-                try {
-                    const response = await fetch(`${baseUrl}/get_user_phone?user_id=${item.user_id}`, {
-                        headers: { "X-Telegram-Init-Data": tg.initData }
-                    });
-                    const data = await response.json();
-                    item.phone = data.phone_number ? `+${data.phone_number}` : "Рақам топилмади";
-                } catch (error) {
-                    item.phone = "Хатолик";
-                }
+                item.phone = await fetchPhoneNumber(uniqueId);
             }
             renderColumn();
         }
 
-        // Показать детали продавца (для отзывов)
-        async function showSellerDetails(sellerId) {
-            alert(`Детали продавца ${sellerId} пока недоступны. Функция в разработке.`);
-            // Можно добавить запрос на новый эндпоинт в будущем
-        }
-
-        // Фильтрация по поиску
-        function filterItem(item) {
-            if (!searchQuery) return true;
-            const query = searchQuery.toLowerCase();
-            return (
-                item.unique_id?.toString().includes(query) ||
-                item.category?.toLowerCase().includes(query) ||
-                item.sort?.toLowerCase().includes(query) ||
-                item.comment?.toLowerCase().includes(query) ||
-                item.seller_id?.toString().includes(query)
-            );
-        }
-
-        // Обработка поиска
-        function searchItems() {
-            searchQuery = document.querySelector('.search-input').value;
+        // Фильтрация по полю
+        function filterBy(field, value) {
+            allData[currentColumn] = allData[currentColumn].filter(item => item[field] === value);
             renderColumn();
         }
 
-        // Инициализация
+        // Фильтрация по региону
+        async function filterByRegion(uniqueId) {
+            const response = await fetch(`${baseUrl}/${currentColumn === 'products' ? 'all_products' : currentColumn === 'archive' ? 'archive' : 'all_requests'}`);
+            const allItems = await response.json();
+            let userRegion;
+            if (currentColumn === 'requests') {
+                userRegion = allItems.find(p => p.unique_id === uniqueId)?.region || 'Неизвестно';
+            } else {
+                userRegion = allItems.find(p => p.unique_id === uniqueId)?.region || 'Неизвестно';
+            }
+            allData[currentColumn] = allItems.filter(p => p.region === userRegion);
+            renderColumn();
+        }
+
+        // Сброс фильтра
+        function resetFilter(columnId) {
+            allData[columnId] = [...originalData[columnId]];
+            renderColumn();
+        }
+
+        // Инициализация при загрузке
         window.onload = () => {
-            showColumn('products');
+            showColumn('products'); // Показываем продукты по умолчанию
         };
     </script>
 </body>
