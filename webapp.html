@@ -322,7 +322,6 @@
                     html += `</div>
                             <div class="item-text">`;
                     if (columnId === 'archive') {
-                        // Архив: Дата архивации и Цена первыми
                         html += `
                             <p class="key-info"><strong>Сана:</strong> ${formatDate(item.archived_at)}</p>
                             <p class="key-info"><strong>Нарх:</strong> ${item.final_price || item.price ? (item.final_price || item.price) + ' сўм' : 'Не указано'}</p>
@@ -332,7 +331,6 @@
                             <p class="secondary-info"><strong>Ҳажм:</strong> ${item.volume_ton || 0} т</p>
                             <p class="secondary-info"><strong>Вилоят:</strong> <span class="clickable" onclick="filterByRegion('${item.unique_id}')">${item.region || 'Не указано'}</span></p>`;
                     } else {
-                        // Продукты и запросы
                         html += `
                             <p class="key-info"><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id || 'Неизвестно'}</span></p>`;
                         if (columnId === 'products') {
@@ -389,7 +387,14 @@
         window.onload = () => {
             showColumn('products'); // Показываем продукты по умолчанию
         };
+
+        // Отправка данных боту при закрытии WebApp
+        Telegram.WebApp.onEvent('webAppClosed', () => {
+            Telegram.WebApp.sendData("closed"); // Отправляем сигнал боту
+        });
+
+        // Убедимся, что при загрузке WebApp готов к работе
+        Telegram.WebApp.ready();
     </script>
-    <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'923fb6c5caf1d9c1',t:'MTc0MjU4Mzg1NS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script>
 </body>
 </html>
