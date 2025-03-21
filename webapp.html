@@ -80,16 +80,17 @@
         .dark h2 { color: #4dabf7; border-bottom: 2px solid #339af0; }
         .item {
             border-radius: 8px;
-            padding: 10px;
+            padding: 12px;
             margin-bottom: 15px;
             display: flex;
             flex-direction: row;
             align-items: flex-start;
-            gap: 10px;
+            gap: 12px;
             transition: transform 0.2s;
+            border-bottom: 1px solid;
         }
-        .light .item { background-color: #f8f9fa; }
-        .dark .item { background-color: #3b4a4b; }
+        .light .item { background-color: #f8f9fa; border-color: #ddd; }
+        .dark .item { background-color: #3b4a4b; border-color: #555; }
         .item:hover {
             transform: translateY(-3px);
             box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
@@ -98,9 +99,16 @@
             flex: 1;
         }
         .item-text p {
-            margin: 3px 0;
+            margin: 4px 0;
+            line-height: 1.5;
+        }
+        .key-info {
+            font-size: 16px;
+            font-weight: bold;
+        }
+        .secondary-info {
             font-size: 14px;
-            line-height: 1.4;
+            color: inherit;
         }
         .clickable {
             cursor: pointer;
@@ -113,7 +121,8 @@
         .photo-container {
             display: flex;
             flex-direction: column;
-            gap: 5px;
+            gap: 6px;
+            min-width: 100px;
         }
         .photo {
             width: 100px;
@@ -155,6 +164,8 @@
             .content {
                 padding: 10px;
             }
+            .key-info { font-size: 14px; }
+            .secondary-info { font-size: 12px; }
         }
     </style>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -286,18 +297,32 @@
                         });
                     }
                     html += `</div>
-                            <div class="item-text">
-                                <p><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id || 'Неизвестно'}</span></p>
-                                <p><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category || 'Не указано'}</span></p>
-                                <p><strong>Сорти:</strong> <span class="clickable" onclick="filterBy('sort', '${item.sort}')">${item.sort || 'Не указано'}</span></p>
-                                <p><strong>Ҳажм:</strong> ${item.volume_ton || 0} т</p>`;
-                    if (columnId !== 'requests') {
-                        html += `<p><strong>Нарх:</strong> ${item.price || 0} сўм</p>`;
+                            <div class="item-text">`;
+                    if (columnId === 'archive') {
+                        // Архив: Дата архивации и Цена первыми
+                        html += `
+                            <p class="key-info"><strong>Архивга ўтган сана:</strong> ${item.archived_at || 'Не указано'}</p>
+                            <p class="key-info"><strong>Нарх:</strong> ${item.price ? item.price + ' сўм' : 'Не указано'}</p>
+                            <p class="secondary-info"><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id || 'Неизвестно'}</span></p>
+                            <p class="secondary-info"><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category || 'Не указано'}</span></p>
+                            <p class="secondary-info"><strong>Сорти:</strong> <span class="clickable" onclick="filterBy('sort', '${item.sort}')">${item.sort || 'Не указано'}</span></p>
+                            <p class="secondary-info"><strong>Ҳажм:</strong> ${item.volume_ton || 0} т</p>
+                            <p class="secondary-info"><strong>Вилоят:</strong> <span class="clickable" onclick="filterByRegion('${item.unique_id}')">${item.region || 'Не указано'}</span></p>`;
+                    } else {
+                        // Продукты и запросы
+                        html += `
+                            <p class="key-info"><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id || 'Неизвестно'}</span></p>`;
+                        if (columnId === 'products') {
+                            html += `<p class="key-info"><strong>Нарх:</strong> ${item.price || 0} сўм</p>`;
+                        }
+                        html += `
+                            <p class="secondary-info"><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category || 'Не указано'}</span></p>
+                            <p class="secondary-info"><strong>Сорти:</strong> <span class="clickable" onclick="filterBy('sort', '${item.sort}')">${item.sort || 'Не указано'}</span></p>
+                            <p class="secondary-info"><strong>Ҳажм:</strong> ${item.volume_ton || 0} т</p>
+                            <p class="secondary-info"><strong>Вилоят:</strong> <span class="clickable" onclick="filterByRegion('${item.unique_id}')">${item.region || 'Не указано'}</span></p>`;
                     }
-                    html += `
-                                <p><strong>Вилоят:</strong> <span class="clickable" onclick="filterByRegion('${item.unique_id}')">${item.region || 'Не указано'}</span></p>`;
                     if (item.phone) {
-                        html += `<p><strong>Телефон:</strong> ${item.phone}</p>`;
+                        html += `<p class="secondary-info"><strong>Телефон:</strong> ${item.phone}</p>`;
                     }
                     html += `</div></div>`;
                 });
