@@ -202,13 +202,13 @@
         // Функция форматирования даты из формата "DD MMMM YYYY йил HH:MM:SS" в "DD MMMM HH:MM"
         function formatDate(dateString) {
             if (!dateString || dateString === 'Не указано' || dateString === 'Неверный формат даты') return 'Не указано';
-            
+
             // Словарь месяцев для проверки
             const monthNames = [
                 'январ', 'феврал', 'март', 'апрел', 'май', 'июн',
                 'июл', 'август', 'сентябр', 'октябр', 'ноябр', 'декабр'
             ];
-            
+
             // Разделяем строку на части
             const parts = dateString.split(' ');
             if (parts.length < 5) return 'Неверный формат даты';
