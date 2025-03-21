@@ -199,17 +199,15 @@
         document.body.className = currentTheme;
         document.querySelector('.theme-toggle').textContent = currentTheme === 'light' ? 'Тёмная тема' : 'Светлая тема';
 
-        // Функция форматирования даты из формата "DD MMMM YYYY йил HH:MM:SS" в "DD MMMM HH:MM"
+        // Функция форматирования даты из "DD MMMM YYYY йил HH:MM:SS" в "DD MMMM YYYY йил HH:MM"
         function formatDate(dateString) {
             if (!dateString || dateString === 'Не указано' || dateString === 'Неверный формат даты') return 'Не указано';
 
-            // Словарь месяцев для проверки
             const monthNames = [
                 'январ', 'феврал', 'март', 'апрел', 'май', 'июн',
                 'июл', 'август', 'сентябр', 'октябр', 'ноябр', 'декабр'
             ];
 
-            // Разделяем строку на части
             const parts = dateString.split(' ');
             if (parts.length < 5) return 'Неверный формат даты';
 
@@ -218,12 +216,10 @@
             const year = parts[2];
             const time = parts[4];
 
-            // Проверка корректности месяца
             if (!monthNames.includes(month.toLowerCase())) return 'Неверный месяц';
 
-            // Извлекаем часы и минуты
             const [hours, minutes] = time.split(':');
-            return `${day} ${month} ${hours}:${minutes}`;
+            return `${day} ${month} ${year} йил ${hours}:${minutes}`;
         }
 
         // Переключение темы
@@ -296,7 +292,7 @@
                     throw new Error(errorData.error);
                 }
                 const userData = await response.json();
-                return userData.phone_number ? `${userData.phone_number}` : "Номер не найден"; // Убрали лишний "+"
+                return userData.phone_number ? `${userData.phone_number}` : "Номер не найден";
             } catch (error) {
                 console.error("Ошибка получения телефона:", error);
                 return `Хатолик: ${error.message}`;
@@ -328,8 +324,8 @@
                     if (columnId === 'archive') {
                         // Архив: Дата архивации и Цена первыми
                         html += `
-                            <p class="key-info"><strong>Сана:</strong> ${formatDate(item.created_at)}</p>
-                            <p class="key-info"><strong>Нарх:</strong> ${item.final_price ? item.final_price + ' сўм' : 'Не указано'}</p>
+                            <p class="key-info"><strong>Сана:</strong> ${formatDate(item.archived_at)}</p>
+                            <p class="key-info"><strong>Нарх:</strong> ${item.final_price || item.price ? (item.final_price || item.price) + ' сўм' : 'Не указано'}</p>
                             <p class="secondary-info"><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id || 'Неизвестно'}</span></p>
                             <p class="secondary-info"><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category || 'Не указано'}</span></p>
                             <p class="secondary-info"><strong>Сорти:</strong> <span class="clickable" onclick="filterBy('sort', '${item.sort}')">${item.sort || 'Не указано'}</span></p>
@@ -394,5 +390,6 @@
             showColumn('products'); // Показываем продукты по умолчанию
         };
     </script>
+    <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'923fb6c5caf1d9c1',t:'MTc0MjU4Mzg1NS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script>
 </body>
 </html>
