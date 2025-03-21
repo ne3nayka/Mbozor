@@ -199,18 +199,30 @@
         document.body.className = currentTheme;
         document.querySelector('.theme-toggle').textContent = currentTheme === 'light' ? 'Тёмная тема' : 'Светлая тема';
 
-        // Функция форматирования даты
+        // Функция форматирования даты из формата "DD MMMM YYYY йил HH:MM:SS" в "DD MMMM HH:MM"
         function formatDate(dateString) {
-            if (!dateString || dateString === 'Не указано') return 'Не указано';
-            const date = new Date(dateString);
-            const day = date.getDate();
+            if (!dateString || dateString === 'Не указано' || dateString === 'Неверный формат даты') return 'Не указано';
+            
+            // Словарь месяцев для проверки
             const monthNames = [
                 'январ', 'феврал', 'март', 'апрел', 'май', 'июн',
                 'июл', 'август', 'сентябр', 'октябр', 'ноябр', 'декабр'
             ];
-            const month = monthNames[date.getMonth()];
-            const hours = date.getHours().toString().padStart(2, '0');
-            const minutes = date.getMinutes().toString().padStart(2, '0');
+            
+            // Разделяем строку на части
+            const parts = dateString.split(' ');
+            if (parts.length < 5) return 'Неверный формат даты';
+
+            const day = parts[0];
+            const month = parts[1];
+            const year = parts[2];
+            const time = parts[4];
+
+            // Проверка корректности месяца
+            if (!monthNames.includes(month.toLowerCase())) return 'Неверный месяц';
+
+            // Извлекаем часы и минуты
+            const [hours, minutes] = time.split(':');
             return `${day} ${month} ${hours}:${minutes}`;
         }
 
@@ -316,8 +328,8 @@
                     if (columnId === 'archive') {
                         // Архив: Дата архивации и Цена первыми
                         html += `
-                            <p class="key-info"><strong>Сана:</strong> ${formatDate(item.archived_at)}</p>
-                            <p class="key-info"><strong>Нарх:</strong> ${item.price ? item.price + ' сўм' : 'Не указано'}</p>
+                            <p class="key-info"><strong>Сана:</strong> ${formatDate(item.created_at)}</p>
+                            <p class="key-info"><strong>Нарх:</strong> ${item.final_price ? item.final_price + ' сўм' : 'Не указано'}</p>
                             <p class="secondary-info"><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id || 'Неизвестно'}</span></p>
                             <p class="secondary-info"><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category || 'Не указано'}</span></p>
                             <p class="secondary-info"><strong>Сорти:</strong> <span class="clickable" onclick="filterBy('sort', '${item.sort}')">${item.sort || 'Не указано'}</span></p>
@@ -331,6 +343,7 @@
                             html += `<p class="key-info"><strong>Нарх:</strong> ${item.price || 0} сўм</p>`;
                         }
                         html += `
+                            <p class="secondary-info"><strong>Сана:</strong> ${formatDate(item.created_at)}</p>
                             <p class="secondary-info"><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category || 'Не указано'}</span></p>
                             <p class="secondary-info"><strong>Сорти:</strong> <span class="clickable" onclick="filterBy('sort', '${item.sort}')">${item.sort || 'Не указано'}</span></p>
                             <p class="secondary-info"><strong>Ҳажм:</strong> ${item.volume_ton || 0} т</p>
@@ -381,5 +394,5 @@
             showColumn('products'); // Показываем продукты по умолчанию
         };
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'923d1a372c0a7b90',t:'MTc0MjU1NjQ3MC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</body>
 </html>
