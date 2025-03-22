@@ -5,7 +5,133 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Эълонлар доскаси</title>
     <style>
-        /* Оставляем стили без изменений */
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            padding: 10px;
+            margin: 0;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        body.light { background-color: #f0f2f5; color: #333; }
+        body.dark { background-color: #1c2526; color: #e0e0e0; }
+        h1 {
+            text-align: center;
+            margin: 10px 0;
+            font-size: 20px;
+        }
+        .light h1 { color: #1a73e8; }
+        .dark h1 { color: #4dabf7; }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .choices {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+        .choice-btn {
+            padding: 8px 15px;
+            font-size: 14px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.2s;
+        }
+        .light .choice-btn { background-color: #28a745; color: white; }
+        .light .choice-btn:hover { background-color: #218838; transform: scale(1.05); }
+        .dark .choice-btn { background-color: #4dabf7; color: #1c2526; }
+        .dark .choice-btn:hover { background-color: #339af0; transform: scale(1.05); }
+        .content {
+            display: none;
+            width: 100%;
+            padding: 0;
+        }
+        .content.active { display: block; }
+        h2 {
+            text-align: center;
+            font-size: 18px;
+            margin: 10px 0;
+        }
+        .light h2 { color: #155724; border-bottom: 1px solid #28a745; }
+        .dark h2 { color: #4dabf7; border-bottom: 1px solid #339af0; }
+        .item {
+            display: flex;
+            align-items: center;
+            padding: 8px;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            background-color: #fff;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s;
+        }
+        .light .item { background-color: #f8f9fa; }
+        .dark .item { background-color: #3b4a4b; }
+        .item:hover { transform: translateY(-2px); }
+        .photo-collage {
+            display: flex;
+            overflow-x: auto;
+            gap: 5px;
+            min-width: 90px;
+            max-width: 90px;
+            scroll-snap-type: x mandatory;
+            -webkit-overflow-scrolling: touch;
+        }
+        .photo {
+            width: 80px;
+            height: 80px;
+            object-fit: cover;
+            border-radius: 4px;
+            flex-shrink: 0;
+            scroll-snap-align: start;
+        }
+        .item-text {
+            flex: 1;
+            padding-left: 8px;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        .item-text p { margin: 2px 0; }
+        .key-info { font-weight: bold; font-size: 14px; }
+        .secondary-info { font-size: 12px; }
+        .clickable { cursor: pointer; text-decoration: underline; }
+        .light .clickable { color: #1a73e8; }
+        .light .clickable:hover { color: #1557b0; }
+        .dark .clickable { color: #4dabf7; }
+        .dark .clickable:hover { color: #339af0; }
+        .no-data {
+            text-align: center;
+            font-style: italic;
+            font-size: 14px;
+            padding: 10px;
+        }
+        .light .no-data { color: #666; }
+        .dark .no-data { color: #a0a0a0; }
+        .theme-toggle, .reset-btn {
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            border: none;
+            font-size: 12px;
+        }
+        .light .theme-toggle, .light .reset-btn { background-color: #1a73e8; color: white; }
+        .dark .theme-toggle, .dark .reset-btn { background-color: #4dabf7; color: #1c2526; }
+        .light .reset-btn:hover { background-color: #1557b0; }
+        .dark .reset-btn:hover { background-color: #339af0; }
+        .theme-toggle { position: fixed; top: 5px; right: 5px; }
+        .reset-btn { margin: 0 auto 10px; display: block; }
+        @media (max-width: 400px) {
+            .choice-btn { padding: 6px 12px; font-size: 12px; }
+            .item { padding: 6px; }
+            .photo { width: 60px; height: 60px; }
+            .item-text { font-size: 12px; }
+            .key-info { font-size: 13px; }
+            .secondary-info { font-size: 11px; }
+            h1 { font-size: 18px; }
+            h2 { font-size: 16px; }
+        }
     </style>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
@@ -27,7 +153,7 @@
         const tg = window.Telegram?.WebApp || { colorScheme: 'light', ready: () => {}, initDataUnsafe: {} };
         tg.ready();
 
-        const baseUrl = tg.initDataUnsafe.web_app_url || "https://395f-84-54-90-170.ngrok-free.app";
+        const baseUrl = tg.initDataUnsafe.web_app_url || "http://localhost:5001"; // Замените на ваш сервер
         let currentTheme = tg.colorScheme || 'light';
         let allData = { products: [], requests: [], archive: [] };
         let originalData = { products: [], requests: [], archive: [] };
@@ -37,14 +163,18 @@
         document.querySelector('.theme-toggle').textContent = currentTheme === 'light' ? 'Тёмная тема' : 'Светлая тема';
 
         function formatDate(dateString) {
-            if (!dateString || dateString === 'Не указано' || dateString === 'Неверный формат даты') return { date: 'Не указано', time: '' };
+            if (!dateString || dateString === 'Не указано' || dateString === 'Неверный формат даты') {
+                return { date: 'Не указано', time: '' };
+            }
             const parts = dateString.split(' ');
-            if (parts.length < 5) return { date: 'Неверный формат даты', time: '' };
+            if (parts.length < 5) {
+                console.error(`Неверный формат даты: ${dateString}`);
+                return { date: 'Неверный формат', time: '' };
+            }
             const day = parts[0];
             const month = parts[1];
-            const year = parts[2];
             const time = parts[4];
-            return { date: `${day} ${month}`, time: time.slice(0, 5) }; // Возвращаем объект с датой и временем
+            return { date: `${day} ${month}`, time: time.slice(0, 5) };
         }
 
         function toggleTheme() {
@@ -55,8 +185,8 @@
         }
 
         function showColumn(columnId) {
-            document.querySelectorAll('.content').forEach(col => col.style.display = 'none');
-            document.getElementById(columnId).style.display = 'block';
+            document.querySelectorAll('.content').forEach(col => col.classList.remove('active'));
+            document.getElementById(columnId).classList.add('active');
             currentColumn = columnId;
             if (!allData[columnId].length) {
                 loadColumnData(columnId);
@@ -68,22 +198,11 @@
         async function loadColumnData(columnId) {
             let url, title;
             switch (columnId) {
-                case 'products':
-                    url = `${baseUrl}/all_products`;
-                    title = 'Эълонлар';
-                    break;
-                case 'requests':
-                    url = `${baseUrl}/all_requests`;
-                    title = 'Сўровлар';
-                    break;
-                case 'archive':
-                    url = `${baseUrl}/archive`;
-                    title = 'Архив';
-                    break;
-                default:
-                    return;
+                case 'products': url = `${baseUrl}/all_products`; title = 'Эълонлар'; break;
+                case 'requests': url = `${baseUrl}/all_requests`; title = 'Сўровлар'; break;
+                case 'archive': url = `${baseUrl}/archive`; title = 'Архив'; break;
+                default: return;
             }
-
             try {
                 const response = await fetch(url);
                 if (!response.ok) throw new Error(`HTTP ошибка: ${response.status}`);
@@ -96,7 +215,7 @@
                 console.error(`Ошибка загрузки ${columnId}:`, error);
                 document.getElementById(columnId).innerHTML = `
                     <h2>${title}</h2>
-                    <p class="no-data">Хатолик юз берди: ${error.message}. Илтимос, кейинроқ уриниб кўринг.</p>
+                    <p class="no-data">Хатолик: ${error.message}</p>
                 `;
             }
         }
@@ -106,11 +225,11 @@
                 const item = allData[currentColumn].find(i => i.unique_id === uniqueId);
                 if (!item) return "Элемент не найден";
                 const response = await fetch(`${baseUrl}/get_user_phone?user_id=${item.user_id}`);
-                if (!response.ok) throw new Error('Ошибка сервера');
+                if (!response.ok) throw new Error(`HTTP ошибка: ${response.status}`);
                 const userData = await response.json();
                 return userData.phone_number ? `${userData.phone_number}` : "Номер не найден";
             } catch (error) {
-                console.error("Ошибка получения телефона:", error);
+                console.error(`Ошибка получения телефона для ${uniqueId}:`, error);
                 return `Хатолик: ${error.message}`;
             }
         }
@@ -125,7 +244,7 @@
                 data.forEach(item => {
                     html += `
                         <div class="item">
-                            <div class="photo-container">`;
+                            <div class="photo-collage">`;
                     if (columnId !== 'requests' && item.photos) {
                         const photos = item.photos.split(",");
                         photos.slice(0, 4).forEach(photo => {
@@ -139,13 +258,11 @@
                     if (columnId === 'archive') {
                         const { date, time } = formatDate(item.archived_at);
                         html += `
-                            <p class="key-info"><strong>Сана:</strong> <span class="clickable" onclick="filterByDate('${date}')">${date}</span></p>
+                            <p class="key-info"><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id || 'Неизвестно'}</span></p>
+                            <p class="key-info"><strong>Нарх:</strong> ${item.final_price || item.price || 'Не указано'} сўм</p>
+                            <p class="secondary-info"><strong>Сана:</strong> <span class="clickable" onclick="filterByDate('${date}')">${date}</span></p>
                             <p class="secondary-info"><strong>Вақти:</strong> ${time || 'Не указано'}</p>
-                            <p class="key-info"><strong>Нарх:</strong> ${item.final_price || item.price ? (item.final_price || item.price) + ' сўм' : 'Не указано'}</p>
-                            <p class="secondary-info"><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id || 'Неизвестно'}</span></p>
                             <p class="secondary-info"><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category || 'Не указано'}</span></p>
-                            <p class="secondary-info"><strong>Сорти:</strong> <span class="clickable" onclick="filterBy('sort', '${item.sort}')">${item.sort || 'Не указано'}</span></p>
-                            <p class="secondary-info"><strong>Ҳажм:</strong> ${item.volume_ton || 0} т</p>
                             <p class="secondary-info"><strong>Вилоят:</strong> <span class="clickable" onclick="filterByRegion('${item.unique_id}')">${item.region || 'Не указано'}</span></p>`;
                     } else {
                         const { date, time } = formatDate(item.created_at);
@@ -157,8 +274,6 @@
                         html += `
                             <p class="secondary-info"><strong>Сана:</strong> ${date} ${time}</p>
                             <p class="secondary-info"><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category || 'Не указано'}</span></p>
-                            <p class="secondary-info"><strong>Сорти:</strong> <span class="clickable" onclick="filterBy('sort', '${item.sort}')">${item.sort || 'Не указано'}</span></p>
-                            <p class="secondary-info"><strong>Ҳажм:</strong> ${item.volume_ton || 0} т</p>
                             <p class="secondary-info"><strong>Вилоят:</strong> <span class="clickable" onclick="filterByRegion('${item.unique_id}')">${item.region || 'Не указано'}</span></p>`;
                     }
                     if (item.phone) {
@@ -174,8 +289,8 @@
             const item = allData[currentColumn].find(i => i.unique_id === uniqueId);
             if (item && !item.phone) {
                 item.phone = await fetchPhoneNumber(uniqueId);
+                renderColumn();
             }
-            renderColumn();
         }
 
         function filterBy(field, value) {
