@@ -188,41 +188,26 @@
         const tg = window.Telegram?.WebApp || { colorScheme: 'light', ready: () => {}, initDataUnsafe: {} };
         tg.ready();
 
-        // Базовый URL из конфига или Telegram Web App
         const baseUrl = tg.initDataUnsafe.web_app_url || "https://395f-84-54-90-170.ngrok-free.app";
         let currentTheme = tg.colorScheme || 'light';
         let allData = { products: [], requests: [], archive: [] };
         let originalData = { products: [], requests: [], archive: [] };
         let currentColumn = 'products';
 
-        // Установка начальной темы
         document.body.className = currentTheme;
         document.querySelector('.theme-toggle').textContent = currentTheme === 'light' ? 'Тёмная тема' : 'Светлая тема';
 
-        // Функция форматирования даты из "DD MMMM YYYY йил HH:MM:SS" в "DD MMMM YYYY йил HH:MM"
         function formatDate(dateString) {
             if (!dateString || dateString === 'Не указано' || dateString === 'Неверный формат даты') return 'Не указано';
-
-            const monthNames = [
-                'январ', 'феврал', 'март', 'апрел', 'май', 'июн',
-                'июл', 'август', 'сентябр', 'октябр', 'ноябр', 'декабр'
-            ];
-
             const parts = dateString.split(' ');
             if (parts.length < 5) return 'Неверный формат даты';
-
             const day = parts[0];
             const month = parts[1];
             const year = parts[2];
-            const time = parts[4];
-
-            if (!monthNames.includes(month.toLowerCase())) return 'Неверный месяц';
-
-            const [hours, minutes] = time.split(':');
-            return `${day} ${month} ${year} йил ${hours}:${minutes}`;
+            const time = parts[4].split(':');
+            return `${day} ${month} ${year} йил ${time[0]}:${time[1]}`;
         }
 
-        // Переключение темы
         function toggleTheme() {
             currentTheme = currentTheme === 'light' ? 'dark' : 'light';
             document.body.className = currentTheme;
@@ -230,7 +215,6 @@
             renderColumn();
         }
 
-        // Показать выбранный столбец
         function showColumn(columnId) {
             document.querySelectorAll('.content').forEach(col => col.style.display = 'none');
             document.getElementById(columnId).style.display = 'block';
@@ -242,7 +226,6 @@
             }
         }
 
-        // Загрузка данных для столбца
         async function loadColumnData(columnId) {
             let url, title;
             switch (columnId) {
@@ -265,10 +248,12 @@
             try {
                 const response = await fetch(url);
                 if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-                    throw new Error(errorData.error || `HTTP error: ${response.status}`);
+                    throw new Error(`HTTP ошибка: ${response.status}`);
                 }
                 const data = await response.json();
+                if (!Array.isArray(data)) {
+                    throw new Error('Данные не в формате массива');
+                }
                 allData[columnId] = data.map(item => ({ ...item, phone: null }));
                 originalData[columnId] = [...data];
                 renderColumn(title);
@@ -281,15 +266,13 @@
             }
         }
 
-        // Получение номера телефона
         async function fetchPhoneNumber(uniqueId) {
             try {
                 const item = allData[currentColumn].find(i => i.unique_id === uniqueId);
                 if (!item) return "Элемент не найден";
                 const response = await fetch(`${baseUrl}/get_user_phone?user_id=${item.user_id}`);
                 if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({ error: "Ошибка сервера" }));
-                    throw new Error(errorData.error);
+                    throw new Error('Ошибка сервера');
                 }
                 const userData = await response.json();
                 return userData.phone_number ? `${userData.phone_number}` : "Номер не найден";
@@ -299,7 +282,6 @@
             }
         }
 
-        // Рендеринг столбца
         function renderColumn(title = currentColumn === 'products' ? 'Эълонлар' : currentColumn === 'requests' ? 'Сўровлар' : 'Архив') {
             const columnId = currentColumn;
             const data = allData[columnId] || [];
@@ -352,7 +334,6 @@
             document.getElementById(columnId).innerHTML = `<h2>${title}</h2>${html}`;
         }
 
-        // Показать номер телефона
         async function showPhone(uniqueId) {
             const item = allData[currentColumn].find(i => i.unique_id === uniqueId);
             if (item && !item.phone) {
@@ -361,13 +342,11 @@
             renderColumn();
         }
 
-        // Фильтрация по полю
         function filterBy(field, value) {
             allData[currentColumn] = allData[currentColumn].filter(item => item[field] === value);
             renderColumn();
         }
 
-        // Фильтрация по региону
         function filterByRegion(uniqueId) {
             const item = allData[currentColumn].find(i => i.unique_id === uniqueId);
             if (item) {
@@ -377,23 +356,19 @@
             }
         }
 
-        // Сброс фильтра
         function resetFilter(columnId) {
             allData[columnId] = [...originalData[columnId]];
             renderColumn();
         }
 
-        // Инициализация при загрузке
         window.onload = () => {
-            showColumn('products'); // Показываем продукты по умолчанию
+            showColumn('products');
         };
 
-        // Отправка данных боту при закрытии WebApp
-        Telegram.WebApp.onEvent('webAppClosed', () => {
-            Telegram.WebApp.sendData("closed"); // Отправляем сигнал боту
+        Telegram.WebApp.onEvent('mainButtonClicked', () => {
+            Telegram.WebApp.sendData("closed");
+            Telegram.WebApp.close();
         });
-
-        // Убедимся, что при загрузке WebApp готов к работе
         Telegram.WebApp.ready();
     </script>
 </body>
