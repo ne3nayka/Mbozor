@@ -23,20 +23,20 @@
         .container {
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 10px;
         }
         .choices {
             display: flex;
             justify-content: center;
-            gap: 8px;
-            margin-bottom: 8px;
+            gap: 10px;
+            margin-bottom: 10px;
             flex-wrap: wrap;
         }
         .choice-btn {
-            padding: 6px 12px;
-            font-size: 13px;
+            padding: 8px 15px;
+            font-size: 14px;
             border: none;
-            border-radius: 5px;
+            border-radius: 6px;
             cursor: pointer;
             transition: background-color 0.2s, transform 0.2s;
         }
@@ -52,12 +52,14 @@
         .content.active { display: block; }
         h2 {
             text-align: center;
-            font-size: 16px;
-            margin: 8px 0;
+            font-size: 18px;
+            margin: 10px 0;
         }
         .light h2 { color: #155724; border-bottom: 1px solid #28a745; }
         .dark h2 { color: #4dabf7; border-bottom: 1px solid #339af0; }
         .item {
+            display: flex;
+            align-items: center;
             padding: 8px;
             margin-bottom: 8px;
             border-radius: 6px;
@@ -68,25 +70,32 @@
         .light .item { background-color: #f8f9fa; }
         .dark .item { background-color: #3b4a4b; }
         .item:hover { transform: translateY(-2px); }
-        .item-text {
-            font-size: 12px;
-            line-height: 1.3;
-            margin-bottom: 5px;
-        }
-        .item-text p { margin: 2px 0; }
-        .key-info { font-weight: bold; font-size: 13px; }
-        .secondary-info { font-size: 11px; }
-        .photo-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 4px;
+        .photo-collage {
+            display: flex;
+            overflow-x: auto;
+            gap: 5px;
+            min-width: 90px;
+            max-width: 90px;
+            scroll-snap-type: x mandatory;
+            -webkit-overflow-scrolling: touch;
         }
         .photo {
-            width: 100%;
-            height: 60px;
+            width: 80px;
+            height: 80px;
             object-fit: cover;
             border-radius: 4px;
+            flex-shrink: 0;
+            scroll-snap-align: start;
         }
+        .item-text {
+            flex: 1;
+            padding-left: 8px;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        .item-text p { margin: 2px 0; }
+        .key-info { font-weight: bold; font-size: 14px; }
+        .secondary-info { font-size: 12px; }
         .clickable { cursor: pointer; text-decoration: underline; }
         .light .clickable { color: #1a73e8; }
         .light .clickable:hover { color: #1557b0; }
@@ -95,13 +104,13 @@
         .no-data {
             text-align: center;
             font-style: italic;
-            font-size: 13px;
-            padding: 8px;
+            font-size: 14px;
+            padding: 10px;
         }
         .light .no-data { color: #666; }
         .dark .no-data { color: #a0a0a0; }
         .theme-toggle, .reset-btn {
-            padding: 5px 10px;
+            padding: 6px 12px;
             border-radius: 4px;
             cursor: pointer;
             border: none;
@@ -112,16 +121,16 @@
         .light .reset-btn:hover { background-color: #1557b0; }
         .dark .reset-btn:hover { background-color: #339af0; }
         .theme-toggle { position: fixed; top: 5px; right: 5px; }
-        .reset-btn { margin: 0 auto 8px; display: block; }
+        .reset-btn { margin: 0 auto 10px; display: block; }
         @media (max-width: 400px) {
-            .choice-btn { padding: 5px 10px; font-size: 12px; }
+            .choice-btn { padding: 6px 12px; font-size: 12px; }
             .item { padding: 6px; }
-            .photo { height: 50px; }
-            .item-text { font-size: 11px; }
-            .key-info { font-size: 12px; }
-            .secondary-info { font-size: 10px; }
+            .photo { width: 60px; height: 60px; }
+            .item-text { font-size: 12px; }
+            .key-info { font-size: 13px; }
+            .secondary-info { font-size: 11px; }
             h1 { font-size: 18px; }
-            h2 { font-size: 15px; }
+            h2 { font-size: 16px; }
         }
     </style>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -144,7 +153,8 @@
         const tg = window.Telegram?.WebApp || { colorScheme: 'light', ready: () => {}, initDataUnsafe: {} };
         tg.ready();
 
-        const baseUrl = tg.initDataUnsafe.web_app_url || "http://localhost:5001"; // Замените на ваш сервер
+        // Используйте ваш публичный URL (ngrok, VPS и т.д.)
+        const baseUrl = "https://your-ngrok-or-server-url"; // Замените на реальный URL
         let currentTheme = tg.colorScheme || 'light';
         let allData = { products: [], requests: [], archive: [] };
         let originalData = { products: [], requests: [], archive: [] };
@@ -176,6 +186,7 @@
         }
 
         function showColumn(columnId) {
+            console.log(`Переключение на колонку: ${columnId}`);
             document.querySelectorAll('.content').forEach(col => col.classList.remove('active'));
             document.getElementById(columnId).classList.add('active');
             currentColumn = columnId;
@@ -195,12 +206,14 @@
                 default: return;
             }
             try {
+                console.log(`Загрузка данных с: ${url}`);
                 const response = await fetch(url);
                 if (!response.ok) throw new Error(`HTTP ошибка: ${response.status}`);
                 const data = await response.json();
                 if (!Array.isArray(data)) throw new Error('Данные не в формате массива');
                 allData[columnId] = data.map(item => ({ ...item, phone: null }));
                 originalData[columnId] = [...data];
+                console.log(`Загружено ${data.length} элементов для ${columnId}`);
                 renderColumn(title);
             } catch (error) {
                 console.error(`Ошибка загрузки ${columnId}:`, error);
@@ -235,6 +248,18 @@
                 data.forEach(item => {
                     html += `
                         <div class="item">
+                            <div class="photo-collage">`;
+                    if (columnId !== 'requests' && item.photos) {
+                        const photos = item.photos.split(",");
+                        photos.slice(0, 4).forEach(photo => {
+                            if (photo.trim()) {
+                                const photoUrl = `${baseUrl}/photo/${photo.trim()}`;
+                                console.log(`Попытка загрузки фото: ${photoUrl}`);
+                                html += `<img class="photo" src="${photoUrl}" alt="Маҳсулот расми" onerror="console.error('Ошибка загрузки фото: ${photoUrl}'); this.style.display='none';">`;
+                            }
+                        });
+                    }
+                    html += `</div>
                             <div class="item-text">`;
                     if (columnId === 'archive') {
                         const { date, time } = formatDate(item.archived_at);
@@ -245,18 +270,14 @@
                             <p class="secondary-info"><strong>Вақти:</strong> ${time || 'Не указано'}</p>
                             <p class="secondary-info"><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category || 'Не указано'}</span></p>
                             <p class="secondary-info"><strong>Вилоят:</strong> <span class="clickable" onclick="filterByRegion('${item.unique_id}')">${item.region || 'Не указано'}</span></p>`;
-                    } else if (columnId === 'products') {
+                    } else {
                         const { date, time } = formatDate(item.created_at);
                         html += `
-                            <p class="key-info"><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id || 'Неизвестно'}</span></p>
-                            <p class="key-info"><strong>Нарх:</strong> ${item.price || 0} сўм</p>
-                            <p class="secondary-info"><strong>Сана:</strong> ${date} ${time}</p>
-                            <p class="secondary-info"><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category || 'Не указано'}</span></p>
-                            <p class="secondary-info"><strong>Вилоят:</strong> <span class="clickable" onclick="filterByRegion('${item.unique_id}')">${item.region || 'Не указано'}</span></p>`;
-                    } else { // requests
-                        const { date, time } = formatDate(item.created_at);
+                            <p class="key-info"><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id || 'Неизвестно'}</span></p>`;
+                        if (columnId === 'products') {
+                            html += `<p class="key-info"><strong>Нарх:</strong> ${item.price || 0} сўм</p>`;
+                        }
                         html += `
-                            <p class="key-info"><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id || 'Неизвестно'}</span></p>
                             <p class="secondary-info"><strong>Сана:</strong> ${date} ${time}</p>
                             <p class="secondary-info"><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category || 'Не указано'}</span></p>
                             <p class="secondary-info"><strong>Вилоят:</strong> <span class="clickable" onclick="filterByRegion('${item.unique_id}')">${item.region || 'Не указано'}</span></p>`;
@@ -264,18 +285,7 @@
                     if (item.phone) {
                         html += `<p class="secondary-info"><strong>Телефон:</strong> ${item.phone}</p>`;
                     }
-                    html += `</div>`;
-                    if (columnId !== 'requests' && item.photos) {
-                        html += `<div class="photo-grid">`;
-                        const photos = item.photos.split(",");
-                        photos.slice(0, 4).forEach(photo => {
-                            if (photo.trim()) {
-                                html += `<img class="photo" src="${baseUrl}/photo/${photo.trim()}" alt="Маҳсулот расми" onerror="this.style.display='none';">`;
-                            }
-                        });
-                        html += `</div>`;
-                    }
-                    html += `</div>`;
+                    html += `</div></div>`;
                 });
             }
             document.getElementById(columnId).innerHTML = `<h2>${title}</h2>${html}`;
@@ -317,10 +327,12 @@
         }
 
         window.onload = () => {
+            console.log("WebApp загружен, инициализация...");
             showColumn('products');
         };
 
         Telegram.WebApp.onEvent('mainButtonClicked', () => {
+            console.log("Кнопка закрытия нажата");
             Telegram.WebApp.sendData("closed");
             Telegram.WebApp.close();
         });
