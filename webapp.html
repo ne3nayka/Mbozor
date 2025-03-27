@@ -266,6 +266,8 @@
                         html += `
                             <p class="key-info"><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id || 'Неизвестно'}</span></p>
                             <p class="key-info"><strong>Нарх:</strong> ${item.final_price || item.price || 'Не указано'} сўм</p>
+                            <p class="secondary-info"><strong>Сорт:</strong> ${item.sort || 'Не указано'}</p>
+                            <p class="secondary-info"><strong>Ҳажм:</strong> ${item.volume_ton || 'Не указано'} тонна</p>
                             <p class="secondary-info"><strong>Сана:</strong> <span class="clickable" onclick="filterByDate('${date}')">${date}</span></p>
                             <p class="secondary-info"><strong>Вақти:</strong> ${time || 'Не указано'}</p>
                             <p class="secondary-info"><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category || 'Не указано'}</span></p>
@@ -275,6 +277,8 @@
                         html += `
                             <p class="key-info"><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id || 'Неизвестно'}</span></p>
                             <p class="key-info"><strong>Нарх:</strong> ${item.price || 'Не указано'} сўм</p>
+                            <p class="secondary-info"><strong>Сорт:</strong> ${item.sort || 'Не указано'}</p>
+                            <p class="secondary-info"><strong>Ҳажм:</strong> ${item.volume_ton || 'Не указано'} тонна</p>
                             <p class="secondary-info"><strong>Сана:</strong> ${date} ${time}</p>
                             <p class="secondary-info"><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category || 'Не указано'}</span></p>
                             <p class="secondary-info"><strong>Вилоят:</strong> <span class="clickable" onclick="filterByRegion('${item.unique_id}')">${item.region || 'Не указано'}</span></p>`;
@@ -335,5 +339,5 @@
         });
         Telegram.WebApp.ready();
     </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'926e4c4fbfdcc018',t:'MTc0MzA3MjMyNS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
