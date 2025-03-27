@@ -273,11 +273,8 @@
                     } else {
                         const { date, time } = formatDate(item.created_at);
                         html += `
-                            <p class="key-info"><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id || 'Неизвестно'}</span></p>`;
-                        if (columnId === 'products') {
-                            html += `<p class="key-info"><strong>Нарх:</strong> ${item.price || 0} сўм</p>`;
-                        }
-                        html += `
+                            <p class="key-info"><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id || 'Неизвестно'}</span></p>
+                            <p class="key-info"><strong>Нарх:</strong> ${item.price || 'Не указано'} сўм</p>
                             <p class="secondary-info"><strong>Сана:</strong> ${date} ${time}</p>
                             <p class="secondary-info"><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category || 'Не указано'}</span></p>
                             <p class="secondary-info"><strong>Вилоят:</strong> <span class="clickable" onclick="filterByRegion('${item.unique_id}')">${item.region || 'Не указано'}</span></p>`;
