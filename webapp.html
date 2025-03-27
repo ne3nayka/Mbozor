@@ -266,7 +266,7 @@
                         html += `
                             <p class="key-info"><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id || 'Неизвестно'}</span></p>
                             <p class="key-info"><strong>Нарх:</strong> ${item.final_price || item.price || 'Не указано'} сўм</p>
-                            <p class="secondary-info"><strong>Сорт:</strong> ${item.sort || 'Не указано'}</p>
+                            <p class="secondary-info"><strong>Сорт:</strong> <span class="clickable" onclick="filterBy('sort', '${item.sort}')">${item.sort || 'Не указано'}</span></p>
                             <p class="secondary-info"><strong>Ҳажм:</strong> ${item.volume_ton || 'Не указано'} тонна</p>
                             <p class="secondary-info"><strong>Сана:</strong> <span class="clickable" onclick="filterByDate('${date}')">${date}</span></p>
                             <p class="secondary-info"><strong>Вақти:</strong> ${time || 'Не указано'}</p>
@@ -277,7 +277,7 @@
                         html += `
                             <p class="key-info"><strong>ID:</strong> <span class="clickable" onclick="showPhone('${item.unique_id}')">${item.unique_id || 'Неизвестно'}</span></p>
                             <p class="key-info"><strong>Нарх:</strong> ${item.price || 'Не указано'} сўм</p>
-                            <p class="secondary-info"><strong>Сорт:</strong> ${item.sort || 'Не указано'}</p>
+                            <p class="secondary-info"><strong>Сорт:</strong> <span class="clickable" onclick="filterBy('sort', '${item.sort}')">${item.sort || 'Не указано'}</span></p>
                             <p class="secondary-info"><strong>Ҳажм:</strong> ${item.volume_ton || 'Не указано'} тонна</p>
                             <p class="secondary-info"><strong>Сана:</strong> ${date} ${time}</p>
                             <p class="secondary-info"><strong>Категория:</strong> <span class="clickable" onclick="filterBy('category', '${item.category}')">${item.category || 'Не указано'}</span></p>
