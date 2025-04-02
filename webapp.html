@@ -150,17 +150,28 @@
     </div>
 
     <script>
-        const tg = window.Telegram?.WebApp || { colorScheme: 'light', ready: () => {}, initDataUnsafe: {} };
-        tg.ready();
-
         const baseUrl = "https://8089-213-230-118-98.ngrok-free.app"; // Замените на реальный URL
-        let currentTheme = tg.colorScheme || 'light';
+        let currentTheme = 'light';
         let allData = { products: [], requests: [], archive: [] };
         let originalData = { products: [], requests: [], archive: [] };
         let currentColumn = 'products';
 
-        document.body.className = currentTheme;
-        document.querySelector('.theme-toggle').textContent = currentTheme === 'light' ? 'Тёмная тема' : 'Светлая тема';
+        // Инициализация после загрузки DOM
+        window.addEventListener('DOMContentLoaded', () => {
+            const tg = window.Telegram?.WebApp || { colorScheme: 'light', ready: () => {}, initDataUnsafe: {} };
+            tg.ready(); // Инициализация Telegram Web App
+            console.log("Telegram WebApp инициализирован");
+
+            // Устанавливаем тему и запускаем приложение
+            currentTheme = tg.colorScheme || 'light';
+            document.body.className = currentTheme;
+            document.querySelector('.theme-toggle').textContent = currentTheme === 'light' ? 'Тёмная тема' : 'Светлая тема';
+            
+            // Запускаем загрузку данных с небольшой задержкой
+            setTimeout(() => {
+                showColumn('products');
+            }, 500);
+        });
 
         function formatDate(dateString) {
             if (!dateString || dateString === 'Не указано' || dateString === 'Неверный формат даты') {
@@ -206,7 +217,7 @@
             }
             try {
                 console.log(`Загрузка данных с: ${url}`);
-                const response = await fetch(url);
+                const response = await fetch(url, { timeout: 10000 });
                 if (!response.ok) throw new Error(`HTTP ошибка: ${response.status}`);
                 const data = await response.json();
                 if (!Array.isArray(data)) throw new Error('Данные не в формате массива');
@@ -254,7 +265,7 @@
                             if (photo.trim()) {
                                 const photoUrl = `${baseUrl}/photo/${photo.trim()}`;
                                 console.log(`Попытка загрузки фото: ${photoUrl}`);
-                                html += `<img class="photo" src="${photoUrl}" alt="Маҳсулот расми" onerror="console.error('Ошибка загрузки фото: ${photoUrl}'); this.style.display='none';">`;
+                                html += `<img class="photo" src="${photoUrl}" alt="Маҳсулот расми" onerror="this.style.display='none';">`;
                             }
                         });
                     }
@@ -326,19 +337,12 @@
             renderColumn();
         }
 
-        window.onload = () => {
-            console.log("WebApp загружен, инициализация...");
-            showColumn('products');
-            // Убеждаемся, что данные не отправляются при загрузке
-            console.log("Проверка: sendData не вызывается при загрузке.");
-        };
-
+        // Обработчик закрытия Web App
         Telegram.WebApp.onEvent('mainButtonClicked', () => {
             console.log("Кнопка закрытия нажата");
             Telegram.WebApp.sendData("closed");
             Telegram.WebApp.close();
         });
-        Telegram.WebApp.ready();
     </script>
 </body>
 </html>
