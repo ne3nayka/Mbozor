@@ -60,6 +60,7 @@ dp = Dispatcher(bot=bot, storage=storage)
 
 # Инициализация веб-сервера
 app = Quart(__name__)
+app.config["PROVIDE_AUTOMATIC_OPTIONS"] = True  # Исправление ошибки
 app = cors(app, allow_origin="*", allow_methods=["GET", "POST"])
 
 # Состояния регистрации
@@ -453,4 +454,3 @@ if __name__ == "__main__":
         logger.info("Бот и сервер остановлены пользователем")
     except Exception as e:
         logger.error(f"Ошибка запуска: {str(e)}", exc_info=True)
-        
