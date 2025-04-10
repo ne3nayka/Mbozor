@@ -57,7 +57,7 @@ if not CHANNEL_ID.startswith("-100"):
     raise ValueError("CHANNEL_ID должен начинаться с '-100' для Telegram каналов")
 
 # URL мини-приложения (по умолчанию из .env с валидацией)
-WEBAPP_URL = os.getenv("WEBAPP_URL", "https://e06f-84-54-66-25.ngrok-free.app")
+WEBAPP_URL = os.getenv("WEBAPP_URL", "https://146.190.105.84:5001")
 try:
     parsed_url = urlparse(WEBAPP_URL)
     if not all([parsed_url.scheme, parsed_url.netloc]):
