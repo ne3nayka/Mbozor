@@ -384,7 +384,7 @@ async def telegram_webhook():
     update = await request.get_json()
     if update:
         logger.info(f"Webhook received: {update}")
-        await dp.process_update(types.Update(**update))
+        await dp.feed_update(bot, types.Update(**update))
         return jsonify({"status": "ok"}), 200
     logger.warning("Получен пустой или некорректный webhook-запрос")
     return jsonify({"error": "Invalid update"}), 400
