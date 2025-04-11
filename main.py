@@ -432,7 +432,7 @@ async def main() -> None:
         from hypercorn.config import Config
         from hypercorn.asyncio import serve
         config = Config()
-        config.bind = ["0.0.0.0:5001"]
+        config.bind = ["0.0.0.0:443"]
         logger.info("Запуск веб-сервера на 0.0.0.0:5001")
         await serve(app, config)
     except Exception as e:
