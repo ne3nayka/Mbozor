@@ -7,14 +7,15 @@ from datetime import datetime
 import aiosqlite
 from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ContentType  # Добавлено для обработки контактов
+from aiogram.enums import ContentType
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand, ReplyKeyboardMarkup, WebAppInfo, ReplyKeyboardRemove
+from aiogram.types import BotCommand, ReplyKeyboardMarkup, WebAppInfo
 from quart import Quart, jsonify, request, send_from_directory
 from quart_cors import cors
 import requests
+import aiogram
 
 from config import BOT_TOKEN, ROLES, SELLER_ROLE, BUYER_ROLE, ADMIN_ROLE, LOG_LEVEL, ADMIN_IDS, ROLE_MAPPING, \
     WEBAPP_URL, DB_NAME
@@ -40,10 +41,9 @@ class UzbekDateFormatter(logging.Formatter):
             eng_date = eng_date.replace(eng, uz)
         return eng_date
 
-# Проверка LOG_LEVEL
 valid_log_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 if LOG_LEVEL.upper() not in valid_log_levels:
-    logger.warning(f"Некорректный LOG_LEVEL: {LOG_LEVEL}. Установлен уровень INFO")
+    logger.warning(f"Некорректный LOG_LEVEL: {LOG_LEVEL}. Установлен INFO")
     log_level = "INFO"
 else:
     log_level = LOG_LEVEL.upper()
@@ -62,20 +62,23 @@ formatter = UzbekDateFormatter('%(asctime)s - %(name)s - %(levelname)s - %(messa
 for handler in logging.getLogger().handlers:
     handler.setFormatter(formatter)
 
+logger.info(f"Используется aiogram версии {aiogram.__version__}")
+
 # Инициализация бота и диспетчера
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-storage = MemoryStorage()  # TODO: Рассмотреть RedisStorage для продакшена
+storage = MemoryStorage()
 dp = Dispatcher(bot=bot, storage=storage)
 
 # Инициализация веб-сервера
 app = Quart(__name__)
 app.config["PROVIDE_AUTOMATIC_OPTIONS"] = True
-app = cors(app, allow_origin=[WEBAPP_URL], allow_methods=["GET", "POST"])  # Ограниченный CORS
+app = cors(app, allow_origin=[WEBAPP_URL], allow_methods=["GET", "POST"])
 
 # Состояния регистрации
 class RegistrationStates(StatesGroup):
     awaiting_role = State()
     awaiting_phone = State()
+    awaiting_phone_number = State()
 
 # Middleware для проверки подписки
 class SubscriptionCheckMiddleware(BaseMiddleware):
@@ -83,20 +86,19 @@ class SubscriptionCheckMiddleware(BaseMiddleware):
         user_id = event.from_user.id
         state: FSMContext = data["state"]
         current_state = await state.get_state()
-        logger.debug(f"SubscriptionCheckMiddleware: Проверка для {user_id}, текст: '{event.text}', состояние: {current_state}")
+        logger.debug(f"Проверка подписки для {user_id}, текст: '{event.text}', состояние: {current_state}")
 
         allowed, role = await check_role(event, allow_unregistered=True)
         if event.text in ["Рўйхатдан ўтиш", "Обуна", "/myid"] or current_state in [
             RegistrationStates.awaiting_role.state,
             RegistrationStates.awaiting_phone.state,
-            "awaiting_phone_number"
+            RegistrationStates.awaiting_phone_number.state
         ]:
-            logger.debug(f"Пропуск проверки подписки для команды '{event.text}' или регистрации")
+            logger.debug(f"Пропуск проверки для команды '{event.text}' или регистрации")
             await handler(event, data)
             return
 
         if not allowed or not role:
-            logger.debug(f"Пользователь {user_id} не зарегистрирован или роль не определена")
             await event.answer("Илтимос, рўйхатдан ўтинг:", reply_markup=get_main_menu(None))
             return
 
@@ -111,10 +113,9 @@ class SubscriptionCheckMiddleware(BaseMiddleware):
                 if current_state and current_state not in [
                     RegistrationStates.awaiting_role.state,
                     RegistrationStates.awaiting_phone.state,
-                    "awaiting_phone_number"
+                    RegistrationStates.awaiting_phone_number.state
                 ]:
                     await state.clear()
-                logger.info(f"Доступ для {user_id} заблокирован из-за неактивной подписки")
                 return
 
         logger.debug(f"Проверка подписки пройдена для {user_id}")
@@ -124,8 +125,7 @@ dp.message.middleware(SubscriptionCheckMiddleware())
 
 # Функции меню
 def get_main_menu(role: str | None) -> ReplyKeyboardMarkup:
-    """Генерирует главное меню на основе роли."""
-    role = ROLE_MAPPING.get(role, role)  # Преобразуем "Харидор" в "buyer"
+    role = ROLE_MAPPING.get(role, role)
     if role == SELLER_ROLE:
         return make_keyboard(["Менинг профилим", "Менинг эълонларим", "Эълон қўшиш", "Эълонлар доскаси"], columns=2)
     elif role == BUYER_ROLE:
@@ -159,12 +159,10 @@ bot.get_ads_menu = get_ads_menu
 # Обработчики Telegram
 @dp.message(F.text == "Эълонлар доскаси")
 async def open_webapp(message: types.Message, state: FSMContext) -> None:
-    """Открывает веб-приложение."""
     user_id = message.from_user.id
     allowed, role = await check_role(message, allow_unregistered=True)
     display_role = {v: k for k, v in ROLE_MAPPING.items()}.get(role, role) if role else None
 
-    # Проверка доступности WEBAPP_URL
     try:
         response = requests.head(WEBAPP_URL, timeout=5)
         if response.status_code != 200:
@@ -183,7 +181,6 @@ async def open_webapp(message: types.Message, state: FSMContext) -> None:
 
 @dp.message(F.text == "/start")
 async def cmd_start(message: types.Message, state: FSMContext) -> None:
-    """Обрабатывает команду /start."""
     user_id = message.from_user.id
     logger.debug(f"cmd_start: Начало обработки для {user_id}")
     allowed, role = await check_role(message, allow_unregistered=True)
@@ -217,21 +214,19 @@ async def cmd_start(message: types.Message, state: FSMContext) -> None:
 
 @dp.message(RegistrationStates.awaiting_role, F.text == "Рўйхатдан ўтиш")
 async def process_role_selection(message: types.Message, state: FSMContext):
-    """Запрашивает выбор роли."""
     await message.answer("Ролни танланг:", reply_markup=make_keyboard(["Харидор", "Сотувчи"], columns=2))
     await state.set_state(RegistrationStates.awaiting_phone)
+    logger.info(f"Пользователь {message.from_user.id} начал выбор роли")
 
-@dp.message(RegistrationStates.awaiting_phone)
-async def process_phone_number(message: types.Message, state: FSMContext):
-    """Обрабатывает выбор роли и запрашивает контакт."""
+@dp.message(RegistrationStates.awaiting_phone, F.text.in_(["Харидор", "Сотувчи"]))
+async def process_role_choice(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
-    text = message.text.strip()
-    role_display = text
+    role_display = message.text.strip()
     role = ROLE_MAPPING.get(role_display)
     if role not in [BUYER_ROLE, SELLER_ROLE]:
         await message.answer("Илтимос, 'Харидор' ёки 'Сотувчи' танланг:",
                             reply_markup=make_keyboard(["Харидор", "Сотувчи"], columns=2))
-        logger.info(f"Неверная роль '{text}' для {user_id}")
+        logger.info(f"Неверная роль '{role_display}' для {user_id}")
         return
     await state.update_data(role=role, role_display=role_display)
     await message.answer(
@@ -242,17 +237,15 @@ async def process_phone_number(message: types.Message, state: FSMContext):
             one_time_keyboard=True
         )
     )
-    await state.set_state("awaiting_phone_number")
+    await state.set_state(RegistrationStates.awaiting_phone_number)
     logger.info(f"Пользователь {user_id} выбрал роль {role_display}, ожидается контакт")
 
-@dp.message(F.state == "awaiting_phone_number", F.content_type == ContentType.CONTACT)
+@dp.message(RegistrationStates.awaiting_phone_number, F.content_type == ContentType.CONTACT)
 async def process_phone_input(message: types.Message, state: FSMContext):
-    """Обрабатывает отправленный контакт."""
     user_id = message.from_user.id
     phone_number = message.contact.phone_number.strip()
     logger.debug(f"Получен контакт от {user_id}: {phone_number}")
 
-    # Нормализуем формат номера
     if not phone_number.startswith("+"):
         phone_number = f"+{phone_number}"
     if not phone_number.startswith("+998") or len(phone_number) != 13 or not phone_number[1:].isdigit():
@@ -268,23 +261,32 @@ async def process_phone_input(message: types.Message, state: FSMContext):
         return
 
     data = await state.get_data()
-    role = data["role"]
-    role_display = data["role_display"]
-    if await register_user(user_id, phone_number, role):
-        await activate_trial(user_id)
-        await message.answer(
-            "Рўйхатдан ўтиш муваффақиятли yakunlandi!",
-            reply_markup=get_main_menu(role_display)
-        )
-        logger.info(f"Пользователь {user_id} зарегистрирован с ролью {role}")
-    else:
-        await message.answer("Регистрацияда хатолик. Админга мурожаат қилинг (@MSMA_UZ).")
-        logger.error(f"Ошибка регистрации для {user_id} с номером {phone_number}")
+    role = data.get("role")
+    role_display = data.get("role_display")
+    if not role or not role_display:
+        await message.answer("Ошибка: роль не выбрана. Пожалуйста, начните заново с /start.")
+        await state.clear()
+        logger.error(f"Роль не найдена в состоянии для {user_id}")
+        return
+
+    try:
+        if await register_user(user_id, phone_number, role):
+            await activate_trial(user_id)
+            await message.answer(
+                "Рўйхатдан ўтиш муваффақиятли yakunlandi!",
+                reply_markup=get_main_menu(role_display)
+            )
+            logger.info(f"Пользователь {user_id} зарегистрирован с ролью {role_display}")
+        else:
+            await message.answer("Регистрацияда хатолик. Админга мурожаат қилинг (@MSMA_UZ).")
+            logger.error(f"Ошибка регистрации для {user_id} с номером {phone_number}")
+    except aiosqlite.Error as e:
+        await message.answer("Ошибка базы данных. Админга мурожаат қилинг (@MSMA_UZ).")
+        logger.error(f"Ошибка базы данных при регистрации {user_id}: {e}")
     await state.clear()
 
-@dp.message(F.state == "awaiting_phone_number")
+@dp.message(RegistrationStates.awaiting_phone_number)
 async def process_phone_input_invalid(message: types.Message, state: FSMContext):
-    """Обрабатывает некорректный ввод вместо контакта."""
     await message.answer(
         "Илтимос, контакт орқали телефон рақамингизни юборинг:",
         reply_markup=types.ReplyKeyboardMarkup(
@@ -295,9 +297,19 @@ async def process_phone_input_invalid(message: types.Message, state: FSMContext)
     )
     logger.info(f"Пользователь {message.from_user.id} отправил некорректный ввод вместо контакта")
 
+@dp.message(F.content_type == ContentType.PHOTO)
+async def handle_photo(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    current_state = await state.get_state()
+    logger.info(f"Пользователь {user_id} отправил фото в состоянии {current_state}")
+    await message.answer(
+        "Извините, отправка фото не поддерживается в текущем состоянии. Выберите действие:",
+        reply_markup=get_main_menu(None)
+    )
+    await state.clear()
+
 @dp.message(F.web_app_data)
 async def handle_webapp_close(message: types.Message, state: FSMContext):
-    """Обрабатывает данные из Web App."""
     user_id = message.from_user.id
     web_app_data = message.web_app_data.data
     logger.info(f"Получены данные из Web App от {user_id}: '{web_app_data}'")
@@ -307,7 +319,11 @@ async def handle_webapp_close(message: types.Message, state: FSMContext):
         return
 
     data = await state.get_data()
-    role = data.get("role_display")  # Используем role_display вместо user_role
+    role = data.get("role_display")
+    if not role:
+        logger.warning(f"Роль не найдена в состоянии для {user_id}, используется None")
+        role = None
+
     if web_app_data == "closed":
         await message.answer(
             "Асосий менюга қайтинг:",
@@ -320,19 +336,18 @@ async def handle_webapp_close(message: types.Message, state: FSMContext):
         await message.answer("Неверный формат данных из Web App.")
 
 async def catch_all(message: types.Message, state: FSMContext) -> None:
-    """Обрабатывает необработанные сообщения."""
     user_id = message.from_user.id
     allowed, role = await check_role(message, allow_unregistered=True)
     display_role = {v: k for k, v in ROLE_MAPPING.items()}.get(role, role) if role else "Нет роли"
     current_state = await state.get_state()
-    logger.warning(f"catch_all: Сообщение '{message.text}' от {user_id} (роль: {display_role}, состояние: {current_state}) не обработано")
+    text = message.text or "None"
+    logger.warning(f"catch_all: Сообщение '{text}' от {user_id} (роль: {display_role}, состояние: {current_state}) не обработано")
     await message.answer("Асосий меню:", reply_markup=get_main_menu(display_role))
     await state.clear()
     logger.info(f"catch_all: Пользователь {user_id} возвращён в главное меню")
 
 # Веб-маршруты
 async def get_all_data(table: str, status: str | None = None) -> list[dict[str, any]]:
-    """Получает данные из таблицы с фильтром по статусу."""
     try:
         async with aiosqlite.connect(DB_NAME) as conn:
             if table == "products":
@@ -342,7 +357,7 @@ async def get_all_data(table: str, status: str | None = None) -> list[dict[str, 
                 query = "SELECT * FROM requests WHERE status != 'hidden'"
                 params = (status,) if status else ()
             if status:
-                query += " AND p.status = ?"
+                query += " AND status = ?"
             cursor = await conn.execute(query, params)
             items = await cursor.fetchall()
             columns = [desc[0] for desc in cursor.description]
@@ -365,7 +380,6 @@ async def get_all_data(table: str, status: str | None = None) -> list[dict[str, 
 
 @app.route('/all_products')
 async def get_all_products():
-    """Возвращает активные продукты."""
     logger.info("Получен запрос на /all_products")
     products = await get_all_data("products", "active")
     if products is None:
@@ -375,7 +389,6 @@ async def get_all_products():
 
 @app.route('/all_requests')
 async def get_all_requests():
-    """Возвращает активные запросы."""
     logger.info("Получен запрос на /all_requests")
     requests_data = await get_all_data("requests", "active")
     if requests_data is None:
@@ -385,7 +398,6 @@ async def get_all_requests():
 
 @app.route('/archive')
 async def get_archive():
-    """Возвращает архивные записи."""
     logger.info("Получен запрос на /archive")
     archived_products = await get_all_data("products", "archived")
     archived_requests = await get_all_data("requests", "archived")
@@ -397,9 +409,8 @@ async def get_archive():
 
 @app.route('/get_user_phone')
 async def get_user_phone():
-    """Возвращает номер телефона и регион по user_id."""
+    logger.info(f"Запрос номера телефона для user_id: {request.args.get('user_id')}")
     user_id = request.args.get('user_id')
-    logger.info(f"Запрос номера телефона для user_id: {user_id}")
     if not user_id:
         return jsonify({"error": "User ID is required"}), 400
     try:
@@ -425,7 +436,6 @@ async def get_user_phone():
 
 @app.route('/photo/<file_id>')
 async def get_photo(file_id: str):
-    """Возвращает фото по file_id."""
     logger.info(f"Запрос фото с file_id: {file_id}")
     get_file_url = f"https://api.telegram.org/bot{BOT_TOKEN}/getFile?file_id={file_id}"
     try:
@@ -450,7 +460,6 @@ async def get_photo(file_id: str):
 
 @app.route('/webapp.html')
 async def serve_webapp():
-    """Сервирует webapp.html."""
     logger.info("Запрос на /webapp.html")
     try:
         response = await send_from_directory('.', 'webapp.html')
@@ -465,7 +474,6 @@ async def serve_webapp():
 
 @app.post('/webhook')
 async def telegram_webhook():
-    """Обрабатывает вебхук от Telegram."""
     update = await request.get_json()
     if update:
         logger.info(f"Webhook received: {update}")
@@ -476,14 +484,14 @@ async def telegram_webhook():
 
 # Настройка обработчиков
 def setup_handlers(dp: Dispatcher) -> None:
-    """Регистрирует все обработчики."""
     from products import register_handlers as register_products_handlers
     dp.message.register(cmd_start, F.text == "/start")
     dp.message.register(open_webapp, F.text == "Эълонлар доскаси")
     dp.message.register(process_role_selection, RegistrationStates.awaiting_role)
-    dp.message.register(process_phone_number, RegistrationStates.awaiting_phone)
-    dp.message.register(process_phone_input, F.state == "awaiting_phone_number", F.content_type == ContentType.CONTACT)
-    dp.message.register(process_phone_input_invalid, F.state == "awaiting_phone_number")
+    dp.message.register(process_role_choice, RegistrationStates.awaiting_phone)
+    dp.message.register(process_phone_input, RegistrationStates.awaiting_phone_number, F.content_type == ContentType.CONTACT)
+    dp.message.register(process_phone_input_invalid, RegistrationStates.awaiting_phone_number)
+    dp.message.register(handle_photo, F.content_type == ContentType.PHOTO)
     dp.message.register(handle_webapp_close, F.web_app_data)
     dp.message.register(catch_all)
     register_profile_handlers(dp)
@@ -496,7 +504,6 @@ def setup_handlers(dp: Dispatcher) -> None:
 
 # Главная функция
 async def main() -> None:
-    """Запускает бот и веб-сервер."""
     logger.info("Бот и веб-сервер запускаются...")
     try:
         await init_db()
@@ -514,7 +521,7 @@ async def main() -> None:
 
         webhook_url = f"{WEBAPP_URL}/webhook"
         logger.info(f"Установка webhook на {webhook_url}")
-        await bot.set_webhook(url=webhook_url, timeout=10)
+        await bot.set_webhook(url=webhook_url)
         logger.info("Webhook успешно установлен")
 
         from hypercorn.config import Config
