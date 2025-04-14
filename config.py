@@ -39,8 +39,13 @@ ROLE_DISPLAY_NAMES = {
     ADMIN_ROLE: "Админ"
 }
 
+# Базовые ID для генерации идентификаторов пользователей
+SELLER_BASE_ID ="C-0000"  # Увеличена емкость до 6 цифр
+BUYER_BASE_ID = "X-0000"   # Увеличена емкость до 6 цифр
+ADMIN_BASE_ID = "A-0000"   # Увеличена емкость до 6 цифр
+
 # Название файла базы данных
-DB_NAME = os.getenv("DB_NAME", "market_bot.db")
+DB_NAME = "/home/developer/Mbozor/database.db"
 
 # Список категорий товаров
 CATEGORIES = ["Помидор", "Бодринг", "Қалампир", "Бақлажон", "Қулупнай", "Лимон"]
