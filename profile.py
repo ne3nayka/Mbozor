@@ -3,10 +3,12 @@ import logging
 from aiogram import types, Dispatcher, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from config import DB_NAME, SELLER_ROLE, MAX_COMPANY_NAME_LENGTH, ROLE_MAPPING, ADMIN_ROLE
-from utils import check_role, make_keyboard, check_subscription
+from aiogram.types import ReplyKeyboardRemove
+from config import DB_NAME, DB_TIMEOUT, SELLER_ROLE, MAX_COMPANY_NAME_LENGTH, ROLE_MAPPING, ADMIN_ROLE, DISPLAY_ROLE_MAPPING
+from utils import check_role, make_keyboard, check_subscription, get_profile_menu, get_main_menu, get_admin_menu, format_uz_datetime, notify_admin, normalize_text
 from regions import get_all_regions, get_districts_for_region
 from datetime import datetime
+import pytz
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +23,14 @@ class ProfileStates(StatesGroup):
 async def require_subscription(message: types.Message, role: str, state: FSMContext) -> bool:
     user_id = message.from_user.id
     if role != ADMIN_ROLE:
-        _, bot_active, _ = await check_subscription(message.bot, user_id)
-        if not bot_active:
+        channel_active, bot_active, is_subscribed = await check_subscription(message.bot, user_id)
+        if not is_subscribed:
             await message.answer(
-                "Сизнинг обунангиз тугади. Обуна бўлиш учун 'Обуна' тугмасини босинг",
-                reply_markup=make_keyboard(["Обуна"], columns=1)
+                "Сизда фаол обуна мавжуд эмас. 'Обуна' тугмасини босинг:",
+                reply_markup=make_keyboard(["Обуна", "Орқага"], columns=2, one_time=True)
             )
-            await state.clear()
+            await state.set_state("Registration:subscription")
+            logger.info(f"User {user_id} denied profile access due to inactive subscription")
             return False
     return True
 
@@ -35,12 +38,18 @@ async def profile_info(message: types.Message, state: FSMContext) -> None:
     user_id = message.from_user.id
     allowed, role = await check_role(message)
     if not allowed:
+        logger.info(f"User {user_id} not allowed to access profile")
+        await message.answer(
+            "Профильга кириш учун рўйхатдан ўтинг:",
+            reply_markup=make_keyboard(["Рўйхатдан ўтиш"], one_time=True)
+        )
+        await state.set_state("Registration:start")
         return
     if not await require_subscription(message, role, state):
         return
-    display_role = {v: k for k, v in ROLE_MAPPING.items()}.get(role, role)
+    display_role = DISPLAY_ROLE_MAPPING.get(role, role)
     try:
-        async with aiosqlite.connect(DB_NAME) as conn:
+        async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
             async with conn.execute(
                 "SELECT phone_number, role, region, district, company_name, unique_id FROM users WHERE id = ?",
                 (user_id,)
@@ -51,38 +60,61 @@ async def profile_info(message: types.Message, state: FSMContext) -> None:
                 "Сизнинг профилингиз топилмади. Илтимос, рўйхатдан ўтинг.",
                 reply_markup=make_keyboard(["Рўйхатдан ўтиш"], one_time=True)
             )
-            await state.clear()
+            await state.set_state("Registration:start")
+            logger.warning(f"Profile not found for user {user_id}")
             return
         info = (
-            f"Телефон: {user[0]}\n"
-            f"Рол: {display_role}\n"
-            f"Вилоят: {user[2] or 'Йўқ'}\n"
-            f"Туман: {user[3] or 'Йўқ'}\n"
+            f"📞 Телефон: {user[0]}\n"
+            f"🎭 Рол: {display_role}\n"
+            f"🌍 Вилоят: {user[2] or 'Йўқ'}\n"
+            f"🏞 Туман: {user[3] or 'Йўқ'}\n"
         )
         if role == SELLER_ROLE:
-            info += f"Компания: {user[4] or 'Йўқ'}\n"
-        info += f"ID: {user[5]}"
-        await message.answer(f"Сизнинг профилингиз:\n{info}", reply_markup=message.bot.get_profile_menu(role=role))
+            info += f"🏢 Компания: {user[4] or 'Йўқ'}\n"
+        info += f"🆔 ID: {user[5]}"
+        reply_markup = get_admin_menu() if role == ADMIN_ROLE else get_profile_menu()
+        await message.answer(
+            f"Сизнинг профилингиз:\n\n{info}",
+            reply_markup=reply_markup
+        )
         await state.set_state(ProfileStates.main)
         logger.info(f"User {user_id} viewed profile info")
     except aiosqlite.Error as e:
-        logger.error(f"Error loading profile for user {user_id}: {e}")
-        await message.answer("Профильни юклашда хатолик.", reply_markup=message.bot.get_profile_menu(role=role))
+        logger.error(f"Error loading profile for user {user_id}: {e}", exc_info=True)
+        await notify_admin(f"Ошибка загрузки профиля для user_id {user_id}: {str(e)}", bot=message.bot)
+        reply_markup = get_admin_menu() if role == ADMIN_ROLE else get_profile_menu()
+        await message.answer(
+            "Профильни юклашда хатолик. Админ билан боғланинг (@MSMA_UZ).",
+            reply_markup=reply_markup
+        )
         await state.set_state(ProfileStates.main)
 
 async def edit_profile_start(message: types.Message, state: FSMContext) -> None:
     user_id = message.from_user.id
+    logger.debug(f"Starting edit_profile_start for user_id={user_id}")
     allowed, role = await check_role(message)
     if not allowed:
+        logger.info(f"User {user_id} not allowed to edit profile")
+        await message.answer(
+            "Профильни таҳрирлаш учун рўйхатдан ўтиш керак.",
+            reply_markup=make_keyboard(["Рўйхатдан ўтиш"], one_time=True)
+        )
+        await state.set_state("Registration:start")
         return
     if not await require_subscription(message, role, state):
+        logger.debug(f"User {user_id} blocked by subscription check")
         return
     try:
         regions = get_all_regions()
+        logger.debug(f"Regions loaded for user_id={user_id}: {regions}")
         if not regions:
-            await message.answer("Вилоятлар рўйхати бўш. Админ билан боғланинг.",
-                                 reply_markup=message.bot.get_profile_menu(role=role))
+            reply_markup = get_admin_menu() if role == ADMIN_ROLE else get_profile_menu()
+            await message.answer(
+                "Вилоятлар рўйхати бўш. Админ билан боғланинг (@MSMA_UZ).",
+                reply_markup=reply_markup
+            )
             await state.set_state(ProfileStates.main)
+            logger.warning(f"Empty regions list for user {user_id}")
             return
         await message.answer(
             "Янги вилоятни танланг:",
@@ -90,23 +122,137 @@ async def edit_profile_start(message: types.Message, state: FSMContext) -> None:
         )
         await state.set_state(EditProfile.region)
         await state.update_data(role=role)
-        logger.debug(f"User {user_id} started editing profile, moved to EditProfile.region")
+        logger.info(f"User {user_id} started editing profile, moved to EditProfile.region")
     except Exception as e:
-        logger.error(f"Error loading regions for user {user_id}: {e}")
-        await message.answer("Хатолик юз берди.", reply_markup=message.bot.get_profile_menu(role=role))
+        logger.error(f"Error in edit_profile_start for user {user_id}: {e}", exc_info=True)
+        await notify_admin(f"Ошибка в edit_profile_start для user_id {user_id}: {str(e)}", bot=message.bot)
+        reply_markup = get_admin_menu() if role == ADMIN_ROLE else get_profile_menu()
+        await message.answer(
+            "Хатолик юз берди. Админ билан боғланинг (@MSMA_UZ).",
+            reply_markup=reply_markup
+        )
         await state.set_state(ProfileStates.main)
+
+async def process_region(message: types.Message, state: FSMContext) -> None:
+    user_id = message.from_user.id
+    normalized_text = normalize_text(message.text)
+    data = await state.get_data()
+    role = data.get("role")
+    regions = get_all_regions()
+    if normalized_text == "Орқага":
+        reply_markup = get_admin_menu() if role == ADMIN_ROLE else get_profile_menu()
+        await message.answer(
+            "Профиль менюси:",
+            reply_markup=reply_markup
+        )
+        await state.set_state(ProfileStates.main)
+        logger.info(f"User {user_id} returned to profile menu from region selection")
+        return
+    if normalized_text not in regions:
+        await message.answer(
+            "Илтимос, рўйхатдан вилоят танланг:",
+            reply_markup=make_keyboard(regions, columns=2, with_back=True)
+        )
+        logger.warning(f"User {user_id} selected invalid region: {message.text}")
+        return
+    try:
+        districts = get_districts_for_region(normalized_text)
+        if not districts:
+            reply_markup = get_admin_menu() if role == ADMIN_ROLE else get_profile_menu()
+            await message.answer(
+                "Туманлар рўйхати бўш. Админ билан боғланинг (@MSMA_UZ).",
+                reply_markup=reply_markup
+            )
+            await state.set_state(ProfileStates.main)
+            logger.warning(f"Empty districts list for region {normalized_text} for user {user_id}")
+            return
+        await state.update_data(region=normalized_text)
+        await message.answer(
+            "Янги туманни танланг:",
+            reply_markup=make_keyboard(districts, columns=2, with_back=True)
+        )
+        await state.set_state(EditProfile.district)
+        logger.info(f"User {user_id} selected region {normalized_text}, moved to EditProfile.district")
+    except Exception as e:
+        logger.error(f"Error processing region for user {user_id}: {e}", exc_info=True)
+        await notify_admin(f"Ошибка обработки региона для user_id {user_id}: {str(e)}", bot=message.bot)
+        reply_markup = get_admin_menu() if role == ADMIN_ROLE else get_profile_menu()
+        await message.answer(
+            "Хатолик юз берди. Админ билан боғланинг (@MSMA_UZ).",
+            reply_markup=reply_markup
+        )
+        await state.set_state(ProfileStates.main)
+
+async def process_district(message: types.Message, state: FSMContext) -> None:
+    user_id = message.from_user.id
+    normalized_text = normalize_text(message.text)
+    data = await state.get_data()
+    role = data.get("role")
+    region = data.get("region")
+    districts = get_districts_for_region(region)
+    if normalized_text == "Орқага":
+        regions = get_all_regions()
+        await message.answer(
+            "Янги вилоятни танланг:",
+            reply_markup=make_keyboard(regions, columns=2, with_back=True)
+        )
+        await state.set_state(EditProfile.region)
+        logger.info(f"User {user_id} returned to region selection from district")
+        return
+    if normalized_text not in districts:
+        await message.answer(
+            "Илтимос, рўйхатдан туман танланг:",
+            reply_markup=make_keyboard(districts, columns=2, with_back=True)
+        )
+        logger.warning(f"User {user_id} selected invalid district: {message.text}")
+        return
+    await state.update_data(district=normalized_text)
+    if role == SELLER_ROLE:
+        await message.answer(
+            f"Компания номини киритинг (макс. {MAX_COMPANY_NAME_LENGTH} белги):",
+            reply_markup=make_keyboard(["Орқага"], one_time=True)
+        )
+        await state.set_state(EditProfile.company_name)
+        logger.info(f"User {user_id} selected district {normalized_text}, moved to EditProfile.company_name")
+    else:
+        await save_edited_profile(message, state)
+
+async def process_company_name(message: types.Message, state: FSMContext) -> None:
+    user_id = message.from_user.id
+    normalized_text = normalize_text(message.text)
+    data = await state.get_data()
+    role = data.get("role")
+    if normalized_text == "Орқага":
+        districts = get_districts_for_region(data.get("region"))
+        await message.answer(
+            "Янги туманни танланг:",
+            reply_markup=make_keyboard(districts, columns=2, with_back=True)
+        )
+        await state.set_state(EditProfile.district)
+        logger.info(f"User {user_id} returned to district selection from company_name")
+        return
+    company_name = normalized_text.strip()
+    if len(company_name) > MAX_COMPANY_NAME_LENGTH:
+        await message.answer(
+            f"Компания номи {MAX_COMPANY_NAME_LENGTH} белгидан ошмаслиги керак. Илтимос, қайта киритинг:",
+            reply_markup=make_keyboard(["Орқага"], one_time=True)
+        )
+        logger.warning(f"User {user_id} entered too long company name: {len(company_name)} characters")
+        return
+    await state.update_data(company_name=company_name)
+    await save_edited_profile(message, state)
 
 async def save_edited_profile(message: types.Message, state: FSMContext) -> None:
     user_id = message.from_user.id
     data = await state.get_data()
     role = data.get("role")
-    display_role = {v: k for k, v in ROLE_MAPPING.items()}.get(role, role)
     try:
-        async with aiosqlite.connect(DB_NAME) as conn:
+        company_name = data.get("company_name") if role == SELLER_ROLE else None
+        async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
             if role == SELLER_ROLE:
                 await conn.execute(
                     "UPDATE users SET region = ?, district = ?, company_name = ? WHERE id = ?",
-                    (data["region"], data["district"], data["company_name"], user_id)
+                    (data["region"], data["district"], company_name, user_id)
                 )
             else:
                 await conn.execute(
@@ -115,247 +261,183 @@ async def save_edited_profile(message: types.Message, state: FSMContext) -> None
                 )
             await conn.commit()
         await message.answer(
-            "Профиль янгиланди! Асосий менюга қайтдик.",
-            reply_markup=message.bot.get_main_menu(display_role)
+            "✅ Профиль янгиланди! Асосий менюга қайтдик.",
+            reply_markup=get_main_menu(role)
         )
         await state.clear()
-        logger.info(f"User {user_id} saved edited profile")
+        logger.info(f"User {user_id} saved edited profile: region={data['region']}, district={data['district']}")
     except aiosqlite.Error as e:
-        logger.error(f"Error updating profile for user {user_id}: {e}")
+        logger.error(f"Error updating profile for user {user_id}: {e}", exc_info=True)
+        await notify_admin(f"Ошибка обновления профиля для user_id {user_id}: {str(e)}", bot=message.bot)
+        reply_markup = get_admin_menu() if role == ADMIN_ROLE else get_profile_menu()
         await message.answer(
-            "Профильни янгилашда хатолик.",
-            reply_markup=message.bot.get_main_menu(display_role)
+            "Профильни янгилашда хатолик. Админ билан боғланинг (@MSMA_UZ).",
+            reply_markup=reply_markup
         )
-        await state.clear()
-
-async def profile_menu(message: types.Message, state: FSMContext) -> None:
-    user_id = message.from_user.id
-    allowed, role = await check_role(message)
-    if not allowed:
-        logger.info(f"User {user_id} not allowed to access profile")
-        return
-    if not await require_subscription(message, role, state):
-        return
-    await message.answer("Менинг профилим:", reply_markup=message.bot.get_profile_menu(role=role))
-    await state.set_state(ProfileStates.main)
-    logger.info(f"User {user_id} (role={role}) entered profile menu")
-
-async def process_profile_action(message: types.Message, state: FSMContext) -> None:
-    user_id = message.from_user.id
-    current_state = await state.get_state()
-    logger.debug(f"Processing ProfileStates.main: user_id={user_id}, text={message.text}, state={current_state}")
-    allowed, role = await check_role(message)
-    if not allowed:
-        logger.info(f"User {user_id} not allowed")
-        return
-    display_role = {v: k for k, v in ROLE_MAPPING.items()}.get(role, role)
-    if current_state != ProfileStates.main.state:
-        logger.warning(f"User {user_id} not in ProfileStates.main, current state: {current_state}")
-        await message.answer("Профиль менюсидан фойдаланинг:", reply_markup=message.bot.get_profile_menu(role=role))
         await state.set_state(ProfileStates.main)
-        return
-    if message.text == "Орқага":
-        await message.answer("Асосий меню:", reply_markup=message.bot.get_main_menu(display_role))
-        await state.clear()
-        logger.info(f"User {user_id} returned to main menu from profile")
-    elif message.text == "Профиль ҳақида маълумот":
-        await profile_info(message, state)
-    elif message.text == "Профильни таҳрирлаш":
-        await edit_profile_start(message, state)
-    elif message.text == "Профильни ўчириш":
-        await profile_delete(message, state)
-    else:
-        await message.answer("Илтимос, менюдан танланг:", reply_markup=message.bot.get_profile_menu(role=role))
-
-async def profile_edit_region(message: types.Message, state: FSMContext) -> None:
-    user_id = message.from_user.id
-    logger.debug(f"Entering profile_edit_region: user_id={user_id}, text={message.text}")
-    allowed, role = await check_role(message)
-    if not allowed:
-        return
-    display_role = {v: k for k, v in ROLE_MAPPING.items()}.get(role, role)
-    if message.text == "Орқага":
-        await message.answer("Менинг профилим:", reply_markup=message.bot.get_profile_menu(role=display_role))
-        await state.set_state(ProfileStates.main)
-        return
-    if not await require_subscription(message, role, state):
-        return
-    region = message.text.strip()
-    regions = get_all_regions()
-    if region not in regions:
-        await message.answer(
-            "Бундай вилоят йўқ. Рўйхатдан танланг:",
-            reply_markup=make_keyboard(regions, columns=2, with_back=True)
-        )
-        return
-    await state.update_data(region=region)
-    if region == "Тошкент шаҳри":
-        if role == SELLER_ROLE:
-            await message.answer(
-                "Янги компания номини киритинг (макс. 50 белги):",
-                reply_markup=make_keyboard(["Орқага"], columns=1)
-            )
-            await state.set_state(EditProfile.company_name)
-        else:
-            await state.update_data(district=None)
-            await save_edited_profile(message, state)
-    else:
-        districts = get_districts_for_region(region)
-        if not districts:
-            await state.update_data(district=None)
-            if role == SELLER_ROLE:
-                await message.answer(
-                    "Янги компания номини киритинг (макс. 50 белги):",
-                    reply_markup=make_keyboard(["Орқага"], columns=1)
-                )
-                await state.set_state(EditProfile.company_name)
-            else:
-                await save_edited_profile(message, state)
-        else:
-            await message.answer(
-                "Янги туманни танланг:",
-                reply_markup=make_keyboard(districts, columns=2, with_back=True)
-            )
-            await state.set_state(EditProfile.district)
-
-async def profile_edit_district(message: types.Message, state: FSMContext) -> None:
-    user_id = message.from_user.id
-    logger.debug(f"Entering profile_edit_district: user_id={user_id}, text={message.text}")
-    allowed, role = await check_role(message)
-    if not allowed:
-        return
-    display_role = {v: k for k, v in ROLE_MAPPING.items()}.get(role, role)
-    if message.text == "Орқага":
-        regions = get_all_regions()
-        await message.answer(
-            "Янги вилоятни танланг:",
-            reply_markup=make_keyboard(regions, columns=2, with_back=True)
-        )
-        await state.set_state(EditProfile.region)
-        return
-    if not await require_subscription(message, role, state):
-        return
-    district = message.text.strip()
-    data = await state.get_data()
-    districts = get_districts_for_region(data["region"])
-    if district not in districts:
-        await message.answer(
-            "Бундай туман йўқ. Рўйхатдан танланг:",
-            reply_markup=make_keyboard(districts, columns=2, with_back=True)
-        )
-        return
-    await state.update_data(district=district)
-    if role == SELLER_ROLE:
-        await message.answer(
-            "Янги компания номини киритинг (макс. 50 белги):",
-            reply_markup=make_keyboard(["Орқага"], columns=1)
-        )
-        await state.set_state(EditProfile.company_name)
-    else:
-        await save_edited_profile(message, state)
-
-async def profile_edit_company_name(message: types.Message, state: FSMContext) -> None:
-    user_id = message.from_user.id
-    logger.debug(f"Entering profile_edit_company_name: user_id={user_id}, text={message.text}")
-    allowed, role = await check_role(message)
-    if not allowed:
-        return
-    display_role = {v: k for k, v in ROLE_MAPPING.items()}.get(role, role)
-    if message.text == "Орқага":
-        data = await state.get_data()
-        districts = get_districts_for_region(data["region"]) if data["region"] != "Тошкент шаҳри" else []
-        if districts:
-            await message.answer(
-                "Янги туманни танланг:",
-                reply_markup=make_keyboard(districts, columns=2, with_back=True)
-            )
-            await state.set_state(EditProfile.district)
-        else:
-            await message.answer(
-                "Янги вилоятни танланг:",
-                reply_markup=make_keyboard(get_all_regions(), columns=2, with_back=True)
-            )
-            await state.set_state(EditProfile.region)
-        return
-    if not await require_subscription(message, role, state):
-        return
-    company_name = message.text.strip()
-    if not company_name or len(company_name) > MAX_COMPANY_NAME_LENGTH:
-        await message.answer(
-            f"Компания номи бўш ёки {MAX_COMPANY_NAME_LENGTH} белгидан узун бўлмаслиги керак:",
-            reply_markup=make_keyboard(["Орқага"], columns=1)
-        )
-        return
-    await state.update_data(company_name=company_name)
-    await save_edited_profile(message, state)
 
 async def profile_delete(message: types.Message, state: FSMContext) -> None:
     user_id = message.from_user.id
     allowed, role = await check_role(message)
     if not allowed:
         logger.info(f"User {user_id} not allowed to delete profile")
+        await message.answer(
+            "Профильни ўчириш учун рўйхатдан ўтиш керак.",
+            reply_markup=make_keyboard(["Рўйхатдан ўтиш"], one_time=True)
+        )
+        await state.set_state("Registration:start")
         return
-    display_role = {v: k for k, v in ROLE_MAPPING.items()}.get(role, role)
-    if not await require_subscription(message, role, state):
-        return
-
-    from database import db_lock
-    async with db_lock:
-        conn = None
-        try:
-            conn = await aiosqlite.connect(DB_NAME)
-            await conn.execute("PRAGMA foreign_keys = ON")
-            await conn.execute("BEGIN TRANSACTION")
-
+    try:
+        async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
             async with conn.execute(
-                    "SELECT id, phone_number, role, region, district, company_name, unique_id FROM users WHERE id = ?",
-                    (user_id,)
+                "SELECT phone_number, role, region, district, company_name, unique_id FROM users WHERE id = ?",
+                (user_id,)
             ) as cursor:
                 user = await cursor.fetchone()
             if not user:
-                await message.answer("❌ Профиль не найден", reply_markup=make_keyboard(["Рўйхатдан ўтиш"], one_time=True))
-                await conn.execute("ROLLBACK")
+                await message.answer(
+                    "Сизнинг профилингиз топилмади.",
+                    reply_markup=get_main_menu(None)
+                )
                 await state.clear()
+                logger.warning(f"Profile not found for deletion for user {user_id}")
                 return
-
-            deleted_at = datetime.now().strftime("%d %B %Y йил %H:%M:%S")
+            now_utc = format_uz_datetime(datetime.now(pytz.UTC))
             await conn.execute(
-                """INSERT INTO deleted_users 
-                (user_id, phone_number, role, region, district, company_name, unique_id, deleted_at, blocked) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (user[0], user[1], user[2], user[3], user[4], user[5], user[6], deleted_at, False)
+                """
+                INSERT INTO deleted_users (user_id, phone_number, role, region, district, company_name, unique_id, deleted_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (user_id, user[0], user[1], user[2], user[3], user[4], user[5], now_utc)
             )
-            logger.debug(f"User {user_id} saved to deleted_users with deleted_at={deleted_at}")
-
             await conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
-            logger.debug(f"User {user_id} deleted from users")
-
             await conn.commit()
+        await state.clear()
+        try:
+            storage = state.storage
+            if hasattr(storage, 'redis'):
+                redis_keys = await storage.redis.keys(f"aiogram:*:{user_id}:*")
+                if redis_keys:
+                    await storage.redis.delete(*redis_keys)
+                    logger.info(f"Cleared {len(redis_keys)} Redis keys for user {user_id}")
+        except Exception as e:
+            logger.warning(f"Failed to clear Redis state for user {user_id}: {e}", exc_info=True)
+        await message.answer(
+            "✅ Профиль муваффақиятли ўчирилди. Қайта рўйхатдан ўтиш учун тугмани босинг:",
+            reply_markup=make_keyboard(["Рўйхатдан ўтиш", "Орқага"], columns=2, one_time=True)
+        )
+        logger.info(f"User {user_id} deleted their profile")
+    except aiosqlite.Error as e:
+        logger.error(f"Error deleting profile for user {user_id}: {e}", exc_info=True)
+        await notify_admin(f"Ошибка удаления профиля для user_id {user_id}: {str(e)}", bot=message.bot)
+        reply_markup = get_admin_menu() if role == ADMIN_ROLE else get_profile_menu()
+        await message.answer(
+            "Профильни ўчиришда хатолик. Админ билан боғланинг (@MSMA_UZ).",
+            reply_markup=reply_markup
+        )
+        await state.set_state(ProfileStates.main)
 
-            await message.answer(
-                "✅ Профиль успешно удалён. Для повторной регистрации нажмите кнопку:",
-                reply_markup=make_keyboard(["Рўйхатдан ўтиш"], one_time=True)
-            )
-            await state.clear()
-            logger.info(f"User {user_id} successfully deleted profile, payments preserved")
+async def profile_menu(message: types.Message, state: FSMContext) -> None:
+    user_id = message.from_user.id
+    normalized_text = normalize_text(message.text)
+    if normalized_text != "Менинг профилим":
+        logger.warning(f"Unexpected text in profile_menu: user_id={user_id}, text='{normalized_text}'")
+        return
+    allowed, role = await check_role(message)
+    if not allowed:
+        logger.info(f"User {user_id} not allowed to access profile")
+        await message.answer(
+            "Профильга кириш учун рўйхатдан ўтинг:",
+            reply_markup=make_keyboard(["Рўйхатдан ўтиш"], one_time=True)
+        )
+        await state.set_state("Registration:start")
+        return
+    if not await require_subscription(message, role, state):
+        return
+    reply_markup = get_admin_menu() if role == ADMIN_ROLE else get_profile_menu()
+    await message.answer(
+        "📋 Менинг профилим:",
+        reply_markup=reply_markup
+    )
+    await state.set_state(ProfileStates.main)
+    logger.info(f"User {user_id} (role={role}) entered profile menu")
 
-        except aiosqlite.Error as e:
-            if conn:
-                await conn.execute("ROLLBACK")
-            logger.error(f"Database error during profile deletion for {user_id}: {str(e)}")
-            await message.answer(
-                "❌ Ошибка при удалении профиля. Пожалуйста, попробуйте позже или обратитесь к администратору.",
-                reply_markup=message.bot.get_profile_menu(role=display_role)
-            )
-            await state.set_state(ProfileStates.main)
-        finally:
-            if conn:
-                await conn.close()
+async def process_profile_action(message: types.Message, state: FSMContext) -> None:
+    user_id = message.from_user.id
+    normalized_text = normalize_text(message.text)
+    current_state = await state.get_state()
+    logger.debug(f"Processing ProfileStates.main: user_id={user_id}, text={normalized_text}, state={current_state}")
+    allowed, role = await check_role(message)
+    if not allowed:
+        logger.info(f"User {user_id} not allowed")
+        await message.answer(
+            "Профиль менюсига кириш учун рўйхатдан ўтиш керак.",
+            reply_markup=make_keyboard(["Рўйхатдан ўтиш"], one_time=True)
+        )
+        await state.set_state("Registration:start")
+        return
+    if current_state != ProfileStates.main.state:
+        logger.warning(f"User {user_id} not in ProfileStates.main, current state: {current_state}")
+        reply_markup = get_admin_menu() if role == ADMIN_ROLE else get_profile_menu()
+        await message.answer(
+            "Профиль менюсидан фойдаланинг:",
+            reply_markup=reply_markup
+        )
+        await state.set_state(ProfileStates.main)
+        return
+    reply_markup = get_admin_menu() if role == ADMIN_ROLE else get_profile_menu()
+    if normalized_text == "Орқага":
+        await message.answer(
+            "🏠 Асосий меню:",
+            reply_markup=get_main_menu(role)
+        )
+        await state.clear()
+        logger.info(f"User {user_id} returned to main menu from profile")
+    elif normalized_text == "Профиль ҳақида маълумот":
+        await profile_info(message, state)
+    elif normalized_text == "Профильни таҳрирлаш":
+        logger.debug(f"User {user_id} selected 'Профильни таҳрирлаш'")
+        await edit_profile_start(message, state)
+    elif normalized_text == "Профильни ўчириш":
+        await profile_delete(message, state)
+    else:
+        await message.answer(
+            "Илтимос, менюдан танланг:",
+            reply_markup=reply_markup
+        )
+        logger.warning(f"User {user_id} sent invalid profile action: {normalized_text}")
+
+async def handle_back_button(message: types.Message, state: FSMContext) -> None:
+    user_id = message.from_user.id
+    normalized_text = normalize_text(message.text)
+    current_state = await state.get_state()
+    logger.debug(f"handle_back_button: user_id={user_id}, text='{normalized_text}', state={current_state}")
+    if normalized_text != "орқага" or current_state != ProfileStates.main.state:
+        logger.debug(f"handle_back_button skipped: user_id={user_id}, text='{normalized_text}', state={current_state}")
+        return
+    allowed, role = await check_role(message)
+    if not allowed:
+        logger.info(f"User {user_id} not allowed")
+        await message.answer(
+            "Профиль менюсига кириш учун рўйхатдан ўтиш керак.",
+            reply_markup=make_keyboard(["Рўйхатдан ўтиш"], one_time=True)
+        )
+        await state.set_state("Registration:start")
+        return
+    reply_markup = get_admin_menu() if role == ADMIN_ROLE else get_profile_menu()
+    await message.answer(
+        "📋 Менинг профилим:",
+        reply_markup=reply_markup
+    )
+    await state.set_state(ProfileStates.main)
+    logger.info(f"User {user_id} returned to profile menu via back button")
 
 def register_handlers(dp: Dispatcher):
+    logger.info("Registering profile handlers")
     dp.message.register(profile_menu, F.text == "Менинг профилим")
     dp.message.register(process_profile_action, ProfileStates.main)
-    dp.message.register(profile_edit_region, EditProfile.region)
-    dp.message.register(profile_edit_district, EditProfile.district)
-    dp.message.register(profile_edit_company_name, EditProfile.company_name)
-    logger.debug("Profile handlers registered successfully")
+    dp.message.register(process_region, EditProfile.region)
+    dp.message.register(process_district, EditProfile.district)
+    dp.message.register(process_company_name, EditProfile.company_name)
+    dp.message.register(handle_back_button, ProfileStates.main, F.text == "Орқага")
+    logger.info("Profile handlers registered")
