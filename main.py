@@ -14,7 +14,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import BaseStorage
 from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo, ReplyKeyboardRemove
+from aiogram.types import BotCommand, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.web_app import check_webapp_signature
 from quart import Quart, jsonify, request, send_from_directory, Response
 from quart_cors import cors
@@ -36,9 +36,9 @@ from config import (
     WEBHOOK_PATH, CATEGORIES
 )
 from database import init_db
+from products import check_expired_products_without_final_price
 from registration import router as registration_router, Registration
 from expiration import router as expiration_router, check_expired_items
-from products import router as products_router
 from profile import register_handlers as register_profile_handlers
 from user_requests import register_handlers as register_request_handlers
 from common import register_handlers as register_common_handlers
@@ -46,10 +46,10 @@ from admin import register_handlers as register_admin_handlers, AdminStates
 from utils import (
     check_role, make_keyboard, MONTHS_UZ, check_subscription,
     format_uz_datetime, parse_uz_datetime,
-    get_main_menu, get_admin_menu, notify_admin
+    get_main_menu, get_admin_menu, notify_admin, invalidate_cache
 )
 
-WEBHOOK_URL = f"https://mbozor.msma.uz{WEBHOOK_PATH}"
+WEBHOOK_URL = f"{WEBAPP_URL}{WEBHOOK_PATH}"
 
 # Глобальные переменные
 bot: Bot = None
@@ -67,7 +67,7 @@ class UzbekDateFormatter(logging.Formatter):
 logger = logging.getLogger(__name__)
 log_level = getattr(logging, LOG_LEVEL.upper(), logging.DEBUG)
 file_handler = RotatingFileHandler(
-    '/home/developer/Mbozor/webhook.log',
+    '/home/mbozor/Mbozor/webhook.log',
     maxBytes=10 * 1024 * 1024,  # 10 MB
     backupCount=5,
     encoding='utf-8'
@@ -79,26 +79,30 @@ console_handler.setLevel(log_level)
 console_handler.setFormatter(UzbekDateFormatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 logging.basicConfig(level=log_level, handlers=[file_handler, console_handler])
 
-# Инициализация Quart приложения
-app = Quart(__name__, static_folder='/home/developer/Mbozor/static')
-app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB
-app = cors(app, allow_origin=["https://mbozor.msma.uz", "https://web.telegram.org"], allow_methods=["GET", "POST"],
-           allow_headers=["X-Telegram-Init-Data"], allow_credentials=True)
-logger.info(f"CORS настроен для: https://mbozor.msma.uz, https://web.telegram.org")
+logging.Formatter.converter = lambda *args: datetime.now(pytz.timezone('Asia/Tashkent')).timetuple()
 
-# Проверка наличия необходимых файлов и директорий
+# Инициализация Quart приложения
+app = Quart(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024  # 1 MB
+app = cors(app, allow_origin=["http://159.65.7.40", "https://web.telegram.org"], allow_methods=["GET", "POST"],
+           allow_headers=["X-Telegram-Init-Data"], allow_credentials=False)
+logger.info(f"CORS настроен для: http://159.65.7.40, https://web.telegram.org")
+
+# Проверка наличия необходимых файлов
 def check_required_files():
     required_files = [
-        '/home/developer/Mbozor/webapp.html',
-        '/home/developer/Mbozor/static'
+        '/home/mbozor/Mbozor/webapp.html'
     ]
     for path in required_files:
         if not os.path.exists(path):
-            logger.critical(f"Отсутствует файл или директория: {path}")
-            raise FileNotFoundError(f"Required file or directory not found: {path}")
+            logger.critical(f"Отсутствует файл: {path}")
+            raise FileNotFoundError(f"Required file not found: {path}")
 
 # Функция для ручной проверки подписи initData
 def manual_check_webapp_signature(token: str, init_data: str) -> bool:
+    if not init_data:
+        logger.error("Пустой initData")
+        return False
     try:
         parsed_data = urllib.parse.parse_qs(init_data)
         if not parsed_data.get('hash'):
@@ -127,30 +131,12 @@ def manual_check_webapp_signature(token: str, init_data: str) -> bool:
 # Обработчик маршрута для Web App
 @app.route('/', methods=['GET', 'HEAD'])
 async def serve_webapp():
-    init_data = request.headers.get("X-Telegram-Init-Data")
-    logger.debug(f"serve_webapp: init_data='{init_data}', length={len(init_data) if init_data else 0}, remote_addr={request.remote_addr}, User-Agent={request.user_agent}")
-    if not init_data:
-        logger.error(f"serve_webapp: Пустой initData от {request.remote_addr}")
-        return jsonify({"error": "Empty initData"}), 403
-    aiogram_valid = check_webapp_signature(BOT_TOKEN, init_data)
-    if not aiogram_valid:
-        logger.error(f"serve_webapp: Недействительный initData от {request.remote_addr}, aiogram_valid={aiogram_valid}, init_data='{init_data}'")
-        return jsonify({"error": "Invalid initData"}), 403
-    logger.info(f"Запрос на / от {request.remote_addr}")
-    if request.method == 'HEAD':
-        response = Response(status=200)
-        response.headers['Content-Type'] = 'text/html; charset=utf-8'
-        response.headers['Cache-Control'] = 'public, max-age=3600'
-        response.headers['Content-Security-Policy'] = (
-            "default-src 'self'; "
-            "script-src 'self' https://telegram.org; "
-            "style-src 'self'; "
-            "img-src 'self' data: https://api.telegram.org; "
-            "connect-src 'self' https://api.telegram.org https://mbozor.msma.uz"
-        )
-        return response
+    logger.info("Запрос on /")
+    headers = dict(request.headers)
+    init_data = request.headers.get("X-Telegram-Init-Data", "Not provided")
+    logger.debug(f"serve_webapp: remote_addr={request.remote_addr}, User-Agent={request.user_agent}, Headers={headers}, Init-Data={init_data}")
     try:
-        response = await send_from_directory('/home/developer/Mbozor', 'webapp.html')
+        response = await send_from_directory('/home/mbozor/Mbozor', 'webapp.html')
         response.headers['Content-Type'] = 'text/html; charset=utf-8'
         response.headers['Cache-Control'] = 'public, max-age=3600'
         response.headers['Content-Security-Policy'] = (
@@ -158,9 +144,9 @@ async def serve_webapp():
             "script-src 'self' https://telegram.org; "
             "style-src 'self'; "
             "img-src 'self' data: https://api.telegram.org; "
-            "connect-src 'self' https://api.telegram.org https://mbozor.msma.uz"
+            "connect-src 'self' http://159.65.7.40 https://api.telegram.org"
         )
-        logger.info("Файл webapp.html успешно отправлен")
+        logger.debug("Файл webapp.html успешно отправлен")
         return response
     except FileNotFoundError:
         logger.error("Файл webapp.html не найден")
@@ -182,7 +168,7 @@ async def serve_static(filename):
         return response
     logger.info(f"GET запрос на статический файл: {safe_filename}")
     try:
-        response = await send_from_directory('/home/developer/Mbozor/static', safe_filename)
+        response = await send_from_directory('/home/mbozor/Mbozor/static', safe_filename)
         response.headers['Cache-Control'] = 'public, max-age=86400'
         logger.debug(f"Статический файл {safe_filename} успешно отправлен")
         return response
@@ -195,7 +181,7 @@ async def serve_static(filename):
         await notify_admin(f"Ошибка при отправке статического файла {safe_filename}: {str(e)}", bot=bot)
         return jsonify({"error": "Server error", "details": str(e)}), 500
 
-# Подключение к Redis с использованием backoff
+# Подключение к Redis
 @backoff.on_exception(backoff.expo, ConnectionError, max_tries=5)
 async def connect_redis():
     logger.info("Попытка подключения к Redis")
@@ -216,50 +202,44 @@ class SubscriptionCheckMiddleware(BaseMiddleware):
         state = data["state"]
         current_state = await state.get_state()
         event_text = event.text if isinstance(event, types.Message) else event.data
-        logger.debug(f"Middleware: user_id={user_id}, chat_id={event.chat.id if hasattr(event, 'chat') else 'unknown'}, event_text={event_text}, state={current_state}, handler={handler.__name__}")
+        logger.info(f"Middleware processing: user_id={user_id}, chat_id={event.chat.id if hasattr(event, 'chat') else 'unknown'}, event_text={event_text}, state={current_state}, handler={handler.__name__}")
 
-        # Пропуск для админов
+        data["dp"] = self.dp  # Передаём Dispatcher в data
+
         if user_id in ADMIN_IDS:
             logger.debug(f"Админ {user_id} пропущен")
             await handler(event, data)
             return
 
-        # Пропуск для команды /start
         if isinstance(event, types.Message) and event.text == "/start":
             logger.debug(f"Пропуск проверки для команды /start от user_id={user_id}, вызов обработчика {handler.__name__}")
             await state.clear()
             await handler(event, data)
             return
 
-        # Пропуск для защищённых состояний и callback-запросов
         protected_states = [
             "Registration:start", "Registration:phone", "Registration:role", "Registration:region",
             "Registration:district", "Registration:company_name", "Registration:subscription",
             "DeleteRequest:delete_request", "CloseRequest:select_request",
             "CloseRequest:awaiting_final_price", "ExpiredItem:choice", "ExpiredItem:final_price",
             "RequestsMenu:menu", "ProfileStates:main", "EditProfile:region", "EditProfile:district",
-            "EditProfile:company_name"
+            "EditProfile:company_name",
+            "CloseProduct:select_item", "CloseProduct:final_price"  # Разрешаем состояния для закрытия объявления
         ]
         if isinstance(event, types.CallbackQuery) or current_state in protected_states:
             logger.debug(f"Пропуск проверки для callback или состояния {current_state}")
             await handler(event, data)
             return
 
-        # Пропуск для разрешённых команд
         allowed_commands = [
             "/myid", "/subscribe", "/reset", "Обуна", "Рўйхатдан ўтиш",
-            "Менинг профилим", "Менинг эълонларим", "Эълон қўшиш",
-            "Эълонлар доскаси", "Менинг сўровларим", "Сўров юбормоқ",
-            "Сўров қўшиш", "Сўровлар рўйхати", "Сўровни ўчириш",
-            "Сўровни ёпиш", "Профильни таҳрирлаш", "Профиль ҳақида маълумот",
-            "Профильни ўчириш", "Орқага"
+            "Эълонни ёпиш"  # Разрешаем команду для закрытия объявления
         ]
         if isinstance(event, types.Message) and event.text in allowed_commands:
             logger.debug(f"Пропуск проверки для команды '{event_text}'")
             await handler(event, data)
             return
 
-        # Проверка регистрации и подписки
         allowed, role = await check_role(event, allow_unregistered=True)
         if not allowed or not role:
             logger.info(f"Незарегистрированный пользователь {user_id} перенаправлен на регистрацию")
@@ -270,15 +250,35 @@ class SubscriptionCheckMiddleware(BaseMiddleware):
                 )
                 await state.set_state(Registration.start)
             except Exception as e:
-                logger.error(f"Ошибка отправки ответа для user_id={user_id}, chat_id={event.chat.id if hasattr(event, 'chat') else 'unknown'}: {e}")
+                logger.error(f"Ошибка отправки ответа для user_id={user_id}: {e}")
                 await notify_admin(f"Ошибка отправки ответа для user_id={user_id}: {str(e)}", bot=data["bot"])
             return
 
         if role != ADMIN_ROLE:
+            # Проверка истёкших объявлений без final_price
             try:
-                channel_active, bot_active, is_subscribed = await check_subscription(data["bot"], user_id)
-                logger.debug(
-                    f"Подписка: user_id={user_id}, channel_active={channel_active}, bot_active={bot_active}, is_subscribed={is_subscribed}")
+                has_expired_products = await check_expired_products_without_final_price(data["bot"], user_id)
+                if has_expired_products:
+                    logger.info(f"User {user_id} has expired products without final_price, restricting access")
+                    try:
+                        await event.answer(
+                            "Сизда якуний нарх киритилмаган эълонлар мавжуд! Илтимос, 'Эълонни ёпиш' тугмасини босинг:",
+                            reply_markup=make_keyboard(["Эълонни ёпиш"], one_time=True)
+                        )
+                        await state.set_state("CloseProduct:select_item")
+                        return
+                    except Exception as e:
+                        logger.error(f"Ошибка отправки ответа о необходимости final_price для user_id={user_id}: {e}")
+                        await notify_admin(f"Ошибка отправки ответа о необходимости final_price для user_id={user_id}: {str(e)}", bot=data["bot"])
+                        return
+            except Exception as e:
+                logger.error(f"Ошибка проверки истёкших объявлений для user_id={user_id}: {e}")
+                await notify_admin(f"Ошибка проверки истёкших объявлений для user_id={user_id}: {str(e)}", bot=data["bot"])
+
+            # Проверка подписки
+            try:
+                _, bot_active, is_subscribed = await check_subscription(data["bot"], user_id, data["dp"].storage)
+                logger.debug(f"Подписка: user_id={user_id}, bot_active={bot_active}, is_subscribed={is_subscribed}")
                 if not is_subscribed:
                     try:
                         await event.answer(
@@ -287,26 +287,26 @@ class SubscriptionCheckMiddleware(BaseMiddleware):
                         )
                         await state.set_state(Registration.subscription)
                         logger.info(f"Пользователь {user_id} перенаправлен на подписку")
+                        return
                     except Exception as e:
-                        logger.error(f"Ошибка отправки ответа о подписке для user_id={user_id}, chat_id={event.chat.id if hasattr(event, 'chat') else 'unknown'}: {e}")
+                        logger.error(f"Ошибка отправки ответа о подписке для user_id={user_id}: {e}")
                         await notify_admin(f"Ошибка отправки ответа о подписке для user_id={user_id}: {str(e)}", bot=data["bot"])
-                    return
+                        return
             except Exception as e:
                 logger.error(f"Ошибка проверки подписки для user_id={user_id}: {e}", exc_info=True)
                 await notify_admin(f"Ошибка проверки подписки для user_id={user_id}: {str(e)}", bot=data["bot"])
                 try:
-                    await event.answer("Хатолик юз берди. Админ билан боғланинг (@MSMA_UZ).")
+                    await event.answer("Хатолик юз берди. Админ билан боғланинг (@ad_mbozor).")
                 except Exception as e2:
-                    logger.error(f"Ошибка отправки сообщения об ошибке для user_id={user_id}, chat_id={event.chat.id if hasattr(event, 'chat') else 'unknown'}: {e2}")
+                    logger.error(f"Ошибка отправки сообщения об ошибке для user_id={user_id}: {e2}")
                 return
 
         await handler(event, data)
 
-# Обработчик для открытия Web App
 async def open_webapp(message: types.Message, state: FSMContext) -> None:
     user_id = message.from_user.id
     current_state = await state.get_state()
-    logger.info(f"open_webapp: user_id={user_id}, text='{message.text}', state={current_state}")
+    logger.info(f"open_webapp: user_id={user_id}, text='{message.text}', state={current_state}, WEBAPP_URL={WEBAPP_URL}")
     allowed, role = await check_role(message, allow_unregistered=True)
     if not allowed or not role:
         await message.answer(
@@ -317,18 +317,22 @@ async def open_webapp(message: types.Message, state: FSMContext) -> None:
         logger.info(f"Незарегистрированный пользователь {user_id} пытался открыть Web App")
         return
     display_role = {v: k for k, v in ROLE_MAPPING.items()}.get(role, role)
-    reply_markup = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Эълонлар доскаси", web_app=WebAppInfo(url=f"{WEBAPP_URL}"))],
-            [KeyboardButton(text="Орқага")]
-        ],
-        resize_keyboard=True,
-        one_time=True
+    # Отправляем подтверждение с главным меню
+    reply_markup = get_main_menu(display_role)
+    await message.answer(
+        "Эълонлар доскаси очиляпти...",
+        reply_markup=reply_markup
     )
-    await message.answer("Эълонлар доскаси:", reply_markup=reply_markup)
-    logger.info(f"Пользователь {user_id} (роль: {display_role}) открыл Web App")
+    logger.info(f"Пользователь {user_id} (роль: {display_role}) открыл Web App по URL: {WEBAPP_URL}")
 
-# Обработчик для закрытия Web App
+async def handle_back(callback: types.CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
+    allowed, role = await check_role(callback, allow_unregistered=True)
+    display_role = {v: k for k, v in ROLE_MAPPING.items()}.get(role, role) if role else None
+    await callback.message.edit_text("Асосий меню:", reply_markup=get_main_menu(display_role))
+    await state.clear()
+    logger.info(f"Пользователь {user_id} вернулся в главное меню")
+
 async def handle_webapp_close(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     web_app_data = message.web_app_data.data
@@ -363,7 +367,62 @@ async def handle_webapp_close(message: types.Message, state: FSMContext):
         logger.warning(f"Неизвестные данные Web App от user_id={user_id}: '{web_app_data}'")
         await message.answer("Неверный формат данных.", reply_markup=get_main_menu(role))
 
-# Функция для получения данных из базы
+async def get_active_data(table: str, bot: Optional[object] = None) -> Dict[str, any]:
+    """
+    Jadvaldan (products yoki requests) status='active' bo‘lgan ma’lumotlarni oladi, сортируя по created_at DESC.
+    """
+    if table not in ["products", "requests"]:
+        logger.error(f"Недопустимая таблица: {table}")
+        return {"items": [], "total": 0}
+
+    try:
+        async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
+            query = f"""
+                SELECT p.*, u.region, u.phone_number
+                FROM {table} p
+                JOIN users u ON p.user_id = u.id
+                WHERE p.status = 'active'
+                ORDER BY p.created_at DESC
+            """
+            count_query = query.replace("SELECT p.*, u.region", "SELECT COUNT(*)").replace("ORDER BY p.created_at DESC", "")
+
+            async with conn.execute(count_query) as cursor:
+                total = (await cursor.fetchone())[0]
+
+            async with conn.execute(query) as cursor:
+                items = await cursor.fetchall()
+                columns = [desc[0] for desc in cursor.description]
+                result = [dict(zip(columns, item)) for item in items]
+
+            for item in result:
+                if "created_at" in item and item["created_at"]:
+                    created_at_dt = parse_uz_datetime(item["created_at"])
+                    if created_at_dt:
+                        item["created_at"] = format_uz_datetime(created_at_dt)
+                    else:
+                        logger.error(f"Ошибка парсинга created_at: {item['created_at']}")
+                        item["created_at"] = "Не указано"
+                if "archived_at" in item and item["archived_at"]:
+                    archived_at_dt = parse_uz_datetime(item["archived_at"])
+                    if archived_at_dt:
+                        item["archived_at"] = format_uz_datetime(archived_at_dt)
+                    else:
+                        logger.error(f"Ошибка парсинга archived_at: {item['archived_at']}")
+                        item["archived_at"] = "Не указано"
+                if "notified" in item:
+                    item["notified"] = bool(item["notified"])
+                if "photos" in item and item["photos"]:
+                    item["photos"] = item["photos"].split(",") if item["photos"] else []
+
+            logger.debug(f"Fetched {len(result)} items from {table}, total: {total}")
+            return {"items": result, "total": total}
+
+    except aiosqlite.Error as e:
+        logger.error(f"Ошибка загрузки данных из {table}: {e}", exc_info=True)
+        if bot:
+            await notify_admin(f"Ошибка загрузки данных из {table}: {str(e)}", bot=bot)
+        return {"items": [], "total": 0}
+
 async def get_all_data(
         table: str,
         storage: Optional[BaseStorage] = None,
@@ -382,6 +441,7 @@ async def get_all_data(
     cache_key = f"cache:{table}:{status}:{page}:{per_page}:{category}:{region}:{search}"
     try:
         if storage and hasattr(storage, 'redis'):
+            await invalidate_cache(storage, table)
             cached = await storage.redis.get(cache_key)
             if cached:
                 logger.debug(f"Данные из кэша для {cache_key}")
@@ -393,7 +453,7 @@ async def get_all_data(
         async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
             params = [(datetime.now(pytz.UTC) - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')]
             query = f"""
-                SELECT p.*, u.region
+                SELECT p.*, u.region, u.phone_number
                 FROM {table} p
                 JOIN users u ON p.user_id = u.id
                 WHERE p.status != 'hidden' AND p.created_at >= ?
@@ -412,7 +472,7 @@ async def get_all_data(
                 search_term = f"%{search}%"
                 params.extend([search_term, search_term])
             count_query = query.replace("SELECT p.*, u.region", "SELECT COUNT(*)")
-            query += " LIMIT ? OFFSET ?"
+            query += " ORDER BY p.created_at DESC LIMIT ? OFFSET ?"
             params.extend([per_page, offset])
 
             async with conn.execute(count_query, params[:-2]) as cursor:
@@ -424,19 +484,11 @@ async def get_all_data(
 
             for item in result:
                 if "created_at" in item and item["created_at"]:
-                    try:
-                        created_at_dt = datetime.strptime(item["created_at"], '%Y-%m-%d %H:%M:%S').replace(tzinfo=pytz.UTC)
-                        item["created_at"] = format_uz_datetime(created_at_dt)
-                    except ValueError:
-                        created_at_dt = parse_uz_datetime(item["created_at"])
-                        item["created_at"] = format_uz_datetime(created_at_dt) if created_at_dt else "Не указано"
+                    created_at_dt = parse_uz_datetime(item["created_at"])
+                    item["created_at"] = format_uz_datetime(created_at_dt) if created_at_dt else "Не указано"
                 if "archived_at" in item and item["archived_at"]:
-                    try:
-                        archived_at_dt = datetime.strptime(item["archived_at"], '%Y-%m-%d %H:%M:%S').replace(tzinfo=pytz.UTC)
-                        item["archived_at"] = format_uz_datetime(archived_at_dt)
-                    except ValueError:
-                        archived_at_dt = parse_uz_datetime(item["archived_at"])
-                        item["archived_at"] = format_uz_datetime(archived_at_dt) if archived_at_dt else "Не указано"
+                    archived_at_dt = parse_uz_datetime(item["archived_at"])
+                    item["archived_at"] = format_uz_datetime(archived_at_dt) if archived_at_dt else "Не указано"
                 if "notified" in item:
                     item["notified"] = bool(item["notified"])
                 if "photos" in item and item["photos"]:
@@ -454,19 +506,37 @@ async def get_all_data(
         await notify_admin(f"Ошибка загрузки данных из {table}: {str(e)}", bot=bot)
         return {"items": [], "total": 0}
 
-# API-эндпоинты
+@app.route('/api/all_active_products')
+async def get_all_active_products():
+    logger.info(f"Запрос на /api/all_active_products, User-Agent: {request.headers.get('User-Agent')}, IP: {request.remote_addr}")
+    try:
+        products = await get_active_data("products")
+        logger.info(f"Возвращено {len(products['items'])} продуктов, всего: {products['total']}")
+        return jsonify(products), 200
+    except Exception as e:
+        logger.error(f"Ошибка обработки /api/all_active_products: {e}", exc_info=True)
+        if bot:
+            await notify_admin(f"Ошибка обработки /api/all_active_products: {str(e)}", bot=bot)
+        return jsonify({"error": "Server error", "details": str(e)}), 500
+
+@app.route('/api/all_active_requests')
+async def get_all_active_requests():
+    logger.info(f"Запрос на /api/all_active_requests, User-Agent: {request.headers.get('User-Agent')}, IP: {request.remote_addr}")
+    try:
+        requests_data = await get_active_data("requests")
+        logger.info(f"Возвращено {len(requests_data['items'])} запросов, всего: {requests_data['total']}")
+        return jsonify(requests_data), 200
+    except Exception as e:
+        logger.error(f"Ошибка обработки /api/all_active_requests: {e}", exc_info=True)
+        if bot:
+            await notify_admin(f"Ошибка обработки /api/all_active_requests: {str(e)}", bot=bot)
+        return jsonify({"error": "Server error", "details": str(e)}), 500
 @app.route('/api/all_products')
 async def get_all_products():
-    logger.info(f"Запрос на /api/all_products, args={request.args}, headers={request.headers}")
-    init_data = request.headers.get("X-Telegram-Init-Data")
-    logger.debug(f"get_all_products: init_data='{init_data}', length={len(init_data) if init_data else 0}, remote_addr={request.remote_addr}")
-    if not init_data:
-        logger.error(f"get_all_products: Пустой initData от {request.remote_addr}")
-        return jsonify({"error": "Empty initData"}), 403
-    aiogram_valid = check_webapp_signature(BOT_TOKEN, init_data)
-    if not aiogram_valid:
-        logger.error(f"get_all_products: Недействительный initData от {request.remote_addr}, aiogram_valid={aiogram_valid}, init_data='{init_data}'")
-        return jsonify({"error": "Invalid initData"}), 403
+    logger.info(f"Запрос на /api/all_products, args={request.args}")
+    init_data = request.headers.get("X-Telegram-Init-Data", "Not provided")
+    headers = dict(request.headers)
+    logger.debug(f"get_all_products: init_data='{init_data}', length={len(init_data) if init_data != 'Not provided' else 0}, remote_addr={request.remote_addr}, Headers={headers}")
     try:
         page = int(request.args.get('page', 1))
         per_page = int(request.args.get('per_page', 20))
@@ -483,16 +553,10 @@ async def get_all_products():
 
 @app.route('/api/all_requests')
 async def get_all_requests():
-    logger.info(f"Запрос на /api/all_requests, args={request.args}, headers={request.headers}")
-    init_data = request.headers.get("X-Telegram-Init-Data")
-    logger.debug(f"get_all_requests: init_data='{init_data}', length={len(init_data) if init_data else 0}, remote_addr={request.remote_addr}")
-    if not init_data:
-        logger.error(f"get_all_requests: Пустой initData от {request.remote_addr}")
-        return jsonify({"error": "Empty initData"}), 403
-    aiogram_valid = check_webapp_signature(BOT_TOKEN, init_data)
-    if not aiogram_valid:
-        logger.error(f"get_all_requests: Недействительный initData от {request.remote_addr}, aiogram_valid={aiogram_valid}, init_data='{init_data}'")
-        return jsonify({"error": "Invalid initData"}), 403
+    logger.info(f"Запрос на /api/all_requests, args={request.args}")
+    init_data = request.headers.get("X-Telegram-Init-Data", "Not provided")
+    headers = dict(request.headers)
+    logger.debug(f"get_all_requests: init_data='{init_data}', length={len(init_data) if init_data != 'Not provided' else 0}, remote_addr={request.remote_addr}, Headers={headers}")
     try:
         page = int(request.args.get('page', 1))
         per_page = int(request.args.get('per_page', 20))
@@ -509,16 +573,10 @@ async def get_all_requests():
 
 @app.route('/api/archive')
 async def get_archive():
-    logger.info(f"Запрос на /api/archive, args={request.args}, headers={request.headers}")
-    init_data = request.headers.get("X-Telegram-Init-Data")
-    logger.debug(f"get_archive: init_data='{init_data}', length={len(init_data) if init_data else 0}, remote_addr={request.remote_addr}")
-    if not init_data:
-        logger.error(f"get_archive: Пустой initData от {request.remote_addr}")
-        return jsonify({"error": "Empty initData"}), 403
-    aiogram_valid = check_webapp_signature(BOT_TOKEN, init_data)
-    if not aiogram_valid:
-        logger.error(f"get_archive: Недействительный initData от {request.remote_addr}, aiogram_valid={aiogram_valid}, init_data='{init_data}'")
-        return jsonify({"error": "Invalid initData"}), 403
+    logger.info(f"Запрос на /api/archive, args={request.args}")
+    init_data = request.headers.get("X-Telegram-Init-Data", "Not provided")
+    headers = dict(request.headers)
+    logger.debug(f"get_archive: init_data='{init_data}', length={len(init_data) if init_data != 'Not provided' else 0}, remote_addr={request.remote_addr}, Headers={headers}")
     try:
         page = int(request.args.get('page', 1))
         per_page = int(request.args.get('per_page', 20))
@@ -536,18 +594,14 @@ async def get_archive():
         await notify_admin(f"Ошибка обработки /api/archive: {str(e)}", bot=bot)
         return jsonify({"error": "Server error", "details": str(e)}), 500
 
+
+
 @app.route('/api/get_user_phone')
 async def get_user_phone():
-    logger.info(f"Запрос на /api/get_user_phone, args={request.args}, headers={request.headers}")
-    init_data = request.headers.get("X-Telegram-Init-Data")
-    logger.debug(f"get_user_phone: init_data='{init_data}', length={len(init_data) if init_data else 0}, remote_addr={request.remote_addr}")
-    if not init_data:
-        logger.error(f"get_user_phone: Пустой initData от {request.remote_addr}")
-        return jsonify({"error": "Empty initData"}), 403
-    aiogram_valid = check_webapp_signature(BOT_TOKEN, init_data)
-    if not aiogram_valid:
-        logger.error(f"get_user_phone: Недействительный initData от {request.remote_addr}, aiogram_valid={aiogram_valid}, init_data='{init_data}'")
-        return jsonify({"error": "Invalid initData"}), 403
+    logger.info(f"Запрос на /api/get_user_phone, args={request.args}")
+    init_data = request.headers.get("X-Telegram-Init-Data", "Not provided")
+    headers = dict(request.headers)
+    logger.debug(f"get_user_phone: init_data='{init_data}', length={len(init_data) if init_data != 'Not provided' else 0}, remote_addr={request.remote_addr}, Headers={headers}")
     user_id = request.args.get('user_id')
     if not user_id:
         logger.error("Отсутствует user_id")
@@ -572,8 +626,8 @@ async def get_user_phone():
         await notify_admin(f"Ошибка базы данных для user_id={user_id}: {str(e)}", bot=bot)
         return jsonify({"error": "Database error"}), 500
 
-# Обработчик вебхука
 @app.route(WEBHOOK_PATH, methods=['POST'])
+@backoff.on_exception(backoff.expo, Exception, max_tries=3)
 async def webhook_handler():
     logger.debug(f"Получен вебхук-запрос, headers={request.headers}, remote_addr={request.remote_addr}, content_length={request.content_length}")
     if dp is None:
@@ -592,6 +646,9 @@ async def webhook_handler():
 
         update_id = update_data.get('update_id')
         logger.debug(f"Webhook update_id={update_id}")
+        if not update_id:
+            logger.warning(f"Отсутствует update_id в запросе: {update_data}")
+            return jsonify({"ok": True}), 200
 
         async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
             async with conn.execute(
@@ -603,6 +660,7 @@ async def webhook_handler():
             await conn.execute("INSERT INTO processed_updates (update_id) VALUES (?)", (update_id,))
             await conn.commit()
 
+        logger.debug(f"Передача обновления в Dispatcher: update_id={update_id}")
         await dp.feed_raw_update(bot, update_data)
         logger.info(f"Обработан update_id={update_id}")
         return jsonify({"ok": True}), 200
@@ -611,7 +669,6 @@ async def webhook_handler():
         await notify_admin(f"Ошибка обработки вебхука: {str(e)}", bot=bot)
         return jsonify({"ok": False, "error": str(e)}), 500
 
-# Установка команд бота
 async def set_bot_commands(bot: Bot) -> None:
     logger.info("Установка команд бота")
     try:
@@ -628,7 +685,6 @@ async def set_bot_commands(bot: Bot) -> None:
         await notify_admin(f"Ошибка установки команд бота: {str(e)}", bot=bot)
         raise
 
-# Запуск при старте бота
 async def on_startup(bot: Bot) -> None:
     logger.info("Запуск on_startup")
     try:
@@ -642,6 +698,7 @@ async def on_startup(bot: Bot) -> None:
 
     try:
         webhook_info = await bot.get_webhook_info()
+        logger.debug(f"Текущий вебхук: {webhook_info.url}")
         if webhook_info.url != WEBHOOK_URL:
             await bot.delete_webhook(drop_pending_updates=True)
             await bot.set_webhook(
@@ -656,7 +713,6 @@ async def on_startup(bot: Bot) -> None:
         await notify_admin(f"Ошибка установки вебхука: {str(e)}", bot=bot)
         raise
 
-# Завершение работы бота
 async def on_shutdown(bot: Bot, dp: Dispatcher, expired_items_task: Optional[asyncio.Task] = None) -> None:
     logger.info("Запуск on_shutdown")
     try:
@@ -687,7 +743,6 @@ async def on_shutdown(bot: Bot, dp: Dispatcher, expired_items_task: Optional[asy
         logger.error(f"Ошибка при завершении работы: {e}", exc_info=True)
         await notify_admin(f"Ошибка при завершении работы: {str(e)}", bot=bot)
 
-# Основная функция запуска
 async def main():
     global bot, dp
     logger.info("Запуск бота")
@@ -715,18 +770,19 @@ async def main():
         raise
 
     try:
-        # Регистрация middleware
-        dp.message.middleware(SubscriptionCheckMiddleware())
-        dp.callback_query.middleware(SubscriptionCheckMiddleware())
+        middleware = SubscriptionCheckMiddleware()
+        middleware.dp = dp
+        dp.message.middleware(middleware)
+        dp.callback_query.middleware(middleware)
         logger.debug("Middleware зарегистрированы для сообщений и callback-запросов")
 
-        # Регистрация роутеров
         dp.include_router(registration_router)
         logger.debug("Зарегистрирован роутер registration_router")
         dp.include_router(expiration_router)
         logger.debug("Зарегистрирован роутер expiration_router")
-        dp.include_router(products_router)
-        logger.debug("Зарегистрирован роутер products_router")
+        from products import register_handlers as products_register_handlers
+        products_register_handlers(dp)
+        logger.debug("Зарегистрированы обработчики products")
         register_profile_handlers(dp)
         logger.debug("Зарегистрированы обработчики profile")
         register_request_handlers(dp)
@@ -736,11 +792,12 @@ async def main():
         register_admin_handlers(dp)
         logger.debug("Зарегистрированы обработчики admin")
 
-        # Регистрация дополнительных обработчиков
         dp.message.register(open_webapp, F.text == "Эълонлар доскаси")
         logger.debug("Зарегистрирован обработчик для команды 'Эълонлар доскаси'")
         dp.message.register(handle_webapp_close, F.web_app_data)
         logger.debug("Зарегистрирован обработчик для закрытия Web App")
+        dp.callback_query.register(handle_back, F.data == "back")
+        logger.debug("Зарегистрирован обработчик для callback 'back'")
     except Exception as e:
         logger.critical(f"Ошибка регистрации middleware или роутеров: {e}", exc_info=True)
         raise
@@ -769,16 +826,10 @@ async def main():
         config.bind = [f"127.0.0.1:{PORT}"]
         config.reuse_port = True
         config.graceful_timeout = 5
-        config.accesslog = "/home/developer/Mbozor/webhook.log"
-        config.errorlog = "/home/developer/Mbozor/webhook.log"
+        config.accesslog = "/home/mbozor/Mbozor/webhook.log"
+        config.errorlog = "/home/mbozor/Mbozor/webhook.log"
         config.loglevel = "DEBUG"
         logger.info(f"Конфигурация Hypercorn: bind={config.bind}, loglevel={config.loglevel}")
-    except Exception as e:
-        logger.critical(f"Ошибка конфигурации Hypercorn: {e}", exc_info=True)
-        raise
-
-    try:
-        logger.info(f"Попытка привязки к порту {PORT}")
         await serve(app, config)
     except Exception as e:
         logger.critical(f"Ошибка запуска сервера на порту {PORT}: {e}", exc_info=True)

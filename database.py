@@ -94,6 +94,7 @@ async def init_db(bot: Bot = None) -> None:
                     status TEXT DEFAULT 'active' CHECK (status IN ('active', 'pending_response', 'archived', 'deleted')),
                     created_at TEXT DEFAULT (datetime('now')),
                     channel_message_id INTEGER,
+                    channel_message_ids TEXT,
                     final_price REAL,
                     archived_at TEXT,
                     region TEXT NOT NULL,
@@ -194,8 +195,11 @@ async def init_db(bot: Bot = None) -> None:
                 CREATE INDEX IF NOT EXISTS idx_products_user_id ON products(user_id);
                 CREATE INDEX IF NOT EXISTS idx_products_unique_id ON products(unique_id);
                 CREATE INDEX IF NOT EXISTS idx_products_created_at ON products(created_at);
+                CREATE INDEX IF NOT EXISTS idx_products_status ON products(status);
                 CREATE INDEX IF NOT EXISTS idx_requests_user_id ON requests(user_id);
                 CREATE INDEX IF NOT EXISTS idx_requests_unique_id ON requests(unique_id);
+                CREATE INDEX IF NOT EXISTS idx_requests_created_at ON requests(created_at);
+                CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
                 CREATE INDEX IF NOT EXISTS idx_pending_items_user_id ON pending_items(user_id);
                 CREATE INDEX IF NOT EXISTS idx_users_phone_number ON users(phone_number);
                 CREATE INDEX IF NOT EXISTS idx_users_id ON users(id);
@@ -203,11 +207,14 @@ async def init_db(bot: Bot = None) -> None:
 
             await _migrate_table(conn, "products", {
                 "channel_message_id": "INTEGER",
+                "channel_message_ids": "TEXT",
                 "status": "TEXT DEFAULT 'active'",
                 "final_price": "REAL",
                 "created_at": "TEXT",
                 "archived_at": "TEXT",
-                "region": "TEXT NOT NULL DEFAULT 'Не указан'"
+                "region": "TEXT NOT NULL DEFAULT 'Не указан'",
+                "archived_photos": "TEXT",
+                "completed_at": "TEXT"
             }, bot=bot)
             await _migrate_table(conn, "requests", {
                 "channel_message_id": "INTEGER",
@@ -341,6 +348,7 @@ async def generate_user_id(role: str, bot: Bot = None) -> str:
     try:
         async with db_lock:
             async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
+                await conn.execute("BEGIN TRANSACTION")
                 logger.debug(f"SQL: SELECT value FROM counters WHERE name = '{counter_name}'")
                 async with conn.execute("SELECT value FROM counters WHERE name = ?", (counter_name,)) as cursor:
                     row = await cursor.fetchone()
@@ -351,6 +359,7 @@ async def generate_user_id(role: str, bot: Bot = None) -> str:
                 unique_id = f"{base_id.rstrip('0123456789')}{numeric_part}"
                 if len(unique_id) > 12:
                     logger.error(f"Сгенерированный unique_id слишком длинный: {unique_id}")
+                    await conn.execute("ROLLBACK")
                     raise ValueError(f"unique_id превышает допустимую длину: {unique_id}")
                 logger.debug(f"SQL: INSERT OR REPLACE INTO counters (name, value) VALUES ('{counter_name}', {new_value})")
                 await conn.execute(
@@ -377,6 +386,7 @@ async def generate_item_id(counter_name: str, prefix: str, bot: Bot = None) -> s
     try:
         async with db_lock:
             async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
+                await conn.execute("BEGIN TRANSACTION")
                 logger.debug(f"SQL: SELECT value FROM counters WHERE name = '{counter_name}'")
                 async with conn.execute("SELECT value FROM counters WHERE name = ?", (counter_name,)) as cursor:
                     result = await cursor.fetchone()
@@ -400,6 +410,7 @@ async def generate_item_id(counter_name: str, prefix: str, bot: Bot = None) -> s
                             return unique_id
                     attempts += 1
                 logger.error(f"{counter_name} учун уникал ID ни {MAX_ATTEMPTS} уринишдан кейин яратиб бўлмади")
+                await conn.execute("ROLLBACK")
                 await notify_admin(f"{counter_name} учун уникал ID ни {MAX_ATTEMPTS} уринишдан кейин яратиб бўлмади", bot=bot)
                 raise ValueError(f"{MAX_ATTEMPTS} уринишдан кейин уникал ID яратиб бўлмади")
     except aiosqlite.Error as e:
@@ -422,11 +433,13 @@ async def ensure_payment_record(user_id: int, bot: Bot = None) -> None:
         try:
             async with db_lock:
                 async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
+                    await conn.execute("BEGIN TRANSACTION")
                     logger.debug(f"SQL: SELECT name FROM sqlite_master WHERE type='table' AND name='payments'")
                     async with conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='payments'") as cursor:
                         if not await cursor.fetchone():
                             logger.error("Таблица payments не существует")
                             await notify_admin("Таблица payments не существует при создании записи оплаты", bot=bot)
+                            await conn.execute("ROLLBACK")
                             raise aiosqlite.Error("Таблица payments не существует")
                     logger.debug(f"SQL: INSERT OR IGNORE INTO payments (user_id, bot_expires, trial_used) VALUES ({user_id}, NULL, 0)")
                     await conn.execute(
@@ -439,7 +452,7 @@ async def ensure_payment_record(user_id: int, bot: Bot = None) -> None:
         except aiosqlite.Error as e:
             logger.error(f"Попытка {attempt + 1}/3: user_id={user_id} хатолик в ensure_payment_record: {e}")
             if "database is locked" in str(e) and attempt < 2:
-                await asyncio.sleep(10)  # Увеличена задержка до 10 секунд
+                await asyncio.sleep(10)
             else:
                 await notify_admin(f"Фойдаланувчи user_id={user_id} тўлов ёзувини яратиб бўлмади (3 попытки): {str(e)}", bot=bot)
                 raise
@@ -459,7 +472,8 @@ async def activate_trial(user_id: int, bot: Bot = None) -> None:
         try:
             async with db_lock:
                 async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
-                    trial_expires = datetime.now(pytz.UTC) + timedelta(days=3)
+                    await conn.execute("BEGIN TRANSACTION")
+                    trial_expires = datetime.now(pytz.timezone('Asia/Tashkent')) + timedelta(days=3)
                     trial_expires_str = format_uz_datetime(trial_expires)
                     logger.debug(f"SQL: INSERT OR REPLACE INTO payments (user_id, bot_expires, trial_used) VALUES ({user_id}, '{trial_expires_str}', 1)")
                     await conn.execute(
@@ -472,7 +486,7 @@ async def activate_trial(user_id: int, bot: Bot = None) -> None:
         except aiosqlite.Error as e:
             logger.error(f"Попытка {attempt + 1}/3: user_id={user_id} хатолик в activate_trial: {e}")
             if "database is locked" in str(e) and attempt < 2:
-                await asyncio.sleep(10)  # Увеличена задержка до 10 секунд
+                await asyncio.sleep(10)
             else:
                 await notify_admin(f"Фойдаланувчи user_id={user_id} синов муддатини активировать бўлмади (3 попытки): {str(e)}", bot=bot)
                 raise
@@ -486,10 +500,11 @@ async def grant_full_subscription(user_id: int, bot: Bot = None) -> None:
     if not isinstance(user_id, int):
         raise ValueError(f"User_id учун бутун сон керак, олинди: {type(user_id)}")
     try:
-        full_expires = datetime.now(pytz.UTC) + timedelta(days=30)
+        full_expires = datetime.now(pytz.timezone('Asia/Tashkent')) + timedelta(days=30)
         full_expires_str = format_uz_datetime(full_expires)
         async with db_lock:
             async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
+                await conn.execute("BEGIN TRANSACTION")
                 logger.debug(f"SQL: INSERT OR REPLACE INTO payments (user_id, bot_expires, channel_expires, trial_used) VALUES ({user_id}, '{full_expires_str}', '{full_expires_str}', COALESCE((SELECT trial_used FROM payments WHERE user_id = {user_id}), FALSE))")
                 await conn.execute(
                     "INSERT OR REPLACE INTO payments (user_id, bot_expires, channel_expires, trial_used) "
@@ -515,11 +530,11 @@ async def register_user(user_id: int, phone_number: str, bot: Bot = None) -> boo
         raise ValueError("Телефон рақами бўш бўлиши мумкин эмас")
 
     logger.info(f"[register_user] Попытка регистрации user_id={user_id}, phone={phone_number}")
-    print(f"Registering user_id={user_id}, phone={phone_number}")  # Временное логирование
     for attempt in range(3):
         try:
             async with db_lock:
                 async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
+                    await conn.execute("BEGIN TRANSACTION")
                     # Проверка на блокировку
                     logger.debug(f"SQL: SELECT blocked FROM deleted_users WHERE user_id = {user_id} AND blocked = 1")
                     async with conn.execute(
@@ -528,6 +543,7 @@ async def register_user(user_id: int, phone_number: str, bot: Bot = None) -> boo
                         blocked = await cursor.fetchone()
                         if blocked:
                             logger.warning(f"Блокланган фойдаланувчи user_id={user_id} рўйхатдан ўтишга уринди")
+                            await conn.execute("ROLLBACK")
                             return False
 
                     # Проверка на существующего пользователя по user_id или phone_number
@@ -540,9 +556,11 @@ async def register_user(user_id: int, phone_number: str, bot: Bot = None) -> boo
                         if existing_user:
                             if existing_user[0] == user_id:
                                 logger.info(f"Фойдаланувчи user_id={user_id} уже существует, phone_number={existing_user[1]}")
+                                await conn.execute("ROLLBACK")
                                 return True
                             else:
                                 logger.warning(f"Телефон рақами {phone_number} уже зарегистрирован другим пользователем user_id={existing_user[0]}")
+                                await conn.execute("ROLLBACK")
                                 return False
 
                     # Регистрация нового пользователя
@@ -562,15 +580,14 @@ async def register_user(user_id: int, phone_number: str, bot: Bot = None) -> boo
         except aiosqlite.IntegrityError as e:
             logger.error(f"Попытка {attempt + 1}/3: Фойдаланувчи user_id={user_id} рўйхатдан ўтишда IntegrityError: {e}")
             await notify_admin(f"Попытка {attempt + 1}/3: Фойдаланувчи user_id={user_id} рўйхатдан ўтишда IntegrityError: {str(e)}", bot=bot)
-            print(f"IntegrityError for user_id={user_id}: {e}")  # Временное логирование
             if attempt < 2:
-                await asyncio.sleep(10)  # Увеличена задержка до 10 секунд
+                await asyncio.sleep(10)
                 continue
             return False
         except aiosqlite.Error as e:
             logger.error(f"Попытка {attempt + 1}/3: user_id={user_id} рўйхатдан ўтишда хатолик: {e}")
             if "database is locked" in str(e) and attempt < 2:
-                await asyncio.sleep(10)  # Увеличена задержка до 10 секунд
+                await asyncio.sleep(10)
             else:
                 await notify_admin(f"Фойдаланувчи user_id={user_id} рўйхатдан ўтишда хатолик (3 попытки): {str(e)}", bot=bot)
                 raise
@@ -593,4 +610,4 @@ async def clear_user_state(user_id: int, storage: RedisStorage, bot: Bot = None)
             logger.debug(f"Фойдаланувчи user_id={user_id} учун сақлаш Redis эмас")
     except Exception as e:
         logger.error(f"Фойдаланувчи user_id={user_id} учун Redis ҳолатини тозалашда хатолик: {e}")
-        await notify_admin(f"Фойдаланувчи user_id={user_id} учун Redis ҳ.retrofit_state_error: {str(e)}", bot=bot)
+        await notify_admin(f"Фойдаланувчи user_id={user_id} учун Redis ҳолатини тозалашда хатолик: {str(e)}", bot=bot)

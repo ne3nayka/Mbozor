@@ -42,3 +42,10 @@ __pycache__/
 venv/
 *.log
 .idea/
+*.pyc
+*.db
+*.db.bak
+*.log.1
+static/
+EXIT
+FLUSHALL

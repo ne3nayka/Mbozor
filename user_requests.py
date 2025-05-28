@@ -1,13 +1,12 @@
 import aiosqlite
 import logging
-
 import pytz
 from aiogram import types, Dispatcher, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from config import DB_NAME, BUYER_ROLE, CATEGORIES, MAX_SORT_LENGTH, MAX_VOLUME_TON, CHANNEL_ID, ADMIN_IDS, SELLER_ROLE, ADMIN_ROLE
-from utils import check_role, make_keyboard, validate_number, check_subscription, format_uz_datetime, parse_uz_datetime, has_pending_items, get_requests_menu, get_ads_menu, get_main_menu, notify_admin
-from profile import normalize_text
+from aiogram.exceptions import TelegramBadRequest
+from config import DB_NAME, BUYER_ROLE, CATEGORIES, MAX_SORT_LENGTH, MAX_VOLUME_TON, CHANNEL_ID, ADMIN_IDS, SELLER_ROLE, ADMIN_ROLE, DB_TIMEOUT
+from utils import check_role, make_keyboard, validate_number_minimal, validate_sort, check_subscription, format_uz_datetime, parse_uz_datetime, has_pending_items, get_requests_menu, get_ads_menu, get_main_menu, notify_admin
 from database import generate_item_id
 from regions import get_all_regions
 from datetime import datetime, timedelta
@@ -19,13 +18,6 @@ class RequestsMenu(StatesGroup):
     menu = State()
 
 class SendRequest(StatesGroup):
-    category = State()
-    sort = State()
-    region = State()
-    volume_ton = State()
-    price = State()
-
-class AddRequest(StatesGroup):
     category = State()
     sort = State()
     region = State()
@@ -44,38 +36,80 @@ def buyer_only(handler):
     async def wrapper(message: types.Message, state: FSMContext, *args, **kwargs):
         user_id = message.from_user.id
         current_state = await state.get_state()
-        logger.debug(f"buyer_only: Проверка для user_id={user_id}, текст: '{message.text}', state={current_state}")
+        logger.info(f"buyer_only: user_id={user_id}, text='{message.text}', state={current_state}")
         try:
+            logger.debug(f"Проверка незавершённых элементов для user_id={user_id}")
             has_pending = await has_pending_items(user_id)
             if has_pending:
                 await notify_next_pending_item(message, state)
-                logger.info(f"User {user_id} has pending items, notifying")
+                logger.info(f"Пользователь {user_id} имеет незавершённые элементы")
                 return
-            channel_active, bot_active, is_subscribed = await check_subscription(message.bot, user_id)
-            if not bot_active:
-                await message.answer("Сизнинг обунангиз тугади.", reply_markup=make_keyboard(["Обуна"], columns=1, one_time=True))
-                await state.clear()
+
+            logger.debug(f"Очистка кэша подписки для user_id={user_id}")
+            try:
+                await state.storage.redis.delete(f"sub:{user_id}")
+                logger.debug(f"Очищен кэш подписки для user_id={user_id}")
+            except Exception as e:
+                logger.warning(f"Ошибка очистки кэша подписки для user_id={user_id}: {e}")
+
+            logger.debug(f"Проверка подписки для user_id={user_id}")
+            success, bot_active, is_subscribed = await check_subscription(message.bot, user_id, state.storage)
+            logger.debug(f"check_subscription: user_id={user_id}, success={success}, bot_active={bot_active}, is_subscribed={is_subscribed}")
+            if not is_subscribed:
+                await message.answer(
+                    "Сизда фаол обуна мавжуд эмас. Админ билан боғланинг (@ad_mbozor).",
+                    reply_markup=get_main_menu(BUYER_ROLE)
+                )
                 await state.set_state("Registration:subscription")
-                logger.info(f"Доступ для {user_id} заблокирован из-за неактивной подписки")
+                logger.info(f"Пользователь {user_id} перенаправлен на подписку")
                 return
+
+            logger.debug(f"Проверка регистрации для user_id={user_id}")
+            async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
+                async with conn.execute(
+                    "SELECT id FROM users WHERE id = ?",
+                    (user_id,)
+                ) as cursor:
+                    user_exists = await cursor.fetchone()
+            if not user_exists:
+                await message.answer(
+                    "Сиз рўйхатдан ўтмагансиз. Илтимос, рўйхатдан ўтинг.",
+                    reply_markup=get_main_menu(None)
+                )
+                await state.set_state("Registration:start")
+                logger.warning(f"Пользователь {user_id} не зарегистрирован")
+                return
+
+            logger.debug(f"Проверка роли для user_id={user_id}")
             allowed, role = await check_role(message, allow_unregistered=True)
+            logger.debug(f"check_role: user_id={user_id}, allowed={allowed}, role={role}")
             if not allowed or (role != BUYER_ROLE and role != ADMIN_ROLE):
-                await message.answer("Бу буйруқ фақат харидорлар учун!", reply_markup=get_main_menu(BUYER_ROLE))
+                await message.answer(
+                    "Бу буйруқ фақат харидорлар учун!",
+                    reply_markup=get_main_menu(BUYER_ROLE)
+                )
                 await state.clear()
                 logger.warning(f"Пользователь {user_id} не прошёл проверку роли: {role}")
                 return
-            logger.debug(f"buyer_only passed for user_id={user_id}, role={role}, pending_items={has_pending}, bot_active={bot_active}, is_subscribed={is_subscribed}")
-            return await handler(message, state, role=role, **kwargs)
+
+            logger.debug(f"Передача управления обработчику {handler.__name__} для user_id={user_id}")
+            return await handler(message, state, role=role)
         except aiosqlite.Error as e:
-            logger.error(f"Database error in buyer_only for user_id={user_id}: {e}", exc_info=True)
-            await notify_admin(f"Database error in buyer_only for user_id={user_id}: {str(e)}", bot=message.bot)
-            await message.answer("Хатолик юз берди! Админ билан боғланинг (@MSMA_UZ).", reply_markup=get_requests_menu())
+            logger.error(f"Ошибка базы данных в buyer_only для user_id={user_id}: {e}", exc_info=True)
+            await notify_admin(f"Ошибка базы данных в buyer_only для user_id={user_id}: {str(e)}", bot=message.bot)
+            await message.answer(
+                "Хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+                reply_markup=get_requests_menu()
+            )
             await state.set_state(RequestsMenu.menu)
             return
         except Exception as e:
-            logger.error(f"Unexpected error in buyer_only for user_id={user_id}: {e}", exc_info=True)
-            await notify_admin(f"Unexpected error in buyer_only for user_id={user_id}: {str(e)}", bot=message.bot)
-            await message.answer("Хатолик юз берди! Админ билан боғланинг (@MSMA_UZ).", reply_markup=get_requests_menu())
+            logger.error(f"Непредвиденная ошибка в buyer_only для user_id={user_id}: {e}", exc_info=True)
+            await notify_admin(f"Непредвиденная ошибка в buyer_only для user_id={user_id}: {str(e)}", bot=message.bot)
+            await message.answer(
+                "Хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+                reply_markup=get_requests_menu()
+            )
             await state.set_state(RequestsMenu.menu)
             return
     return wrapper
@@ -83,371 +117,387 @@ def buyer_only(handler):
 @buyer_only
 async def send_request_start(message: types.Message, state: FSMContext, role: str):
     user_id = message.from_user.id
-    current_state = await state.get_state()
-    logger.debug(f"send_request_start: user_id={user_id}, text='{message.text}', state={current_state}")
+    logger.debug(f"send_request_start: user_id={user_id}, text='{message.text}'")
     try:
-        await message.answer("Маҳсулот турини танланг:", reply_markup=make_keyboard(CATEGORIES, columns=2, with_back=True))
+        await message.answer(
+            "Маҳсулот турини танланг:",
+            reply_markup=make_keyboard(CATEGORIES, columns=2, with_back=True)
+        )
         await state.set_state(SendRequest.category)
-        logger.info(f"Пользователь {user_id} начал создание запроса через 'Сўров юбормоқ'")
+        logger.info(f"Пользователь {user_id} начал создание запроса через 'Сўров юбориш'")
     except Exception as e:
         logger.error(f"Ошибка в send_request_start для user_id={user_id}: {e}", exc_info=True)
         await notify_admin(f"Ошибка в send_request_start для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Хатолик юз берди! Админ билан боғланинг (@MSMA_UZ).", reply_markup=get_main_menu(role))
+        await message.answer(
+            "Хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=get_main_menu(role)
+        )
         await state.clear()
 
 @buyer_only
 async def requests_menu(message: types.Message, state: FSMContext, role: str):
     user_id = message.from_user.id
-    current_state = await state.get_state()
-    logger.debug(f"requests_menu: user_id={user_id}, text='{message.text}', current_state={current_state}")
+    logger.debug(f"requests_menu: user_id={user_id}, text='{message.text}'")
     try:
-        if current_state != RequestsMenu.menu.state:
-            await state.clear()
-            logger.debug(f"Состояние очищено для user_id={user_id}, было: {current_state}")
+        await state.clear()
         await message.answer("Менинг сўровларим:", reply_markup=get_requests_menu())
         await state.set_state(RequestsMenu.menu)
-        logger.info(f"Пользователь {user_id} вошёл в меню сўровларим")
+        logger.info(f"Пользователь {user_id} вошёл в меню 'Менинг сўровларим'")
     except Exception as e:
         logger.error(f"Ошибка в requests_menu для user_id={user_id}: {e}", exc_info=True)
         await notify_admin(f"Ошибка в requests_menu для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Хатолик юз берди! Админ билан боғланинг (@MSMA_UZ).", reply_markup=get_main_menu(role))
+        await message.answer(
+            "Хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=get_main_menu(role)
+        )
         await state.clear()
 
 @buyer_only
 async def handle_requests_back_button(message: types.Message, state: FSMContext, role: str):
     user_id = message.from_user.id
-    normalized_text = normalize_text(message.text)
-    current_state = await state.get_state()
-    logger.debug(f"handle_requests_back_button: user_id={user_id}, text='{normalized_text}', state={current_state}")
-    if current_state != RequestsMenu.menu.state:
-        logger.warning(f"Unexpected state for handle_requests_back_button: user_id={user_id}, state={current_state}")
-        await state.clear()
-        await message.answer("Менинг сўровларим:", reply_markup=get_requests_menu())
-        await state.set_state(RequestsMenu.menu)
-        return
-    if normalized_text != "Орқага":
-        logger.debug(f"handle_requests_back_button skipped: text='{normalized_text}', state={current_state}")
+    logger.debug(f"handle_requests_back_button: user_id={user_id}, text='{message.text}'")
+    if message.text != "Орқага":
+        logger.debug(f"Пропущен handle_requests_back_button: text='{message.text}'")
         return
     try:
-        channel_active, bot_active, is_subscribed = await check_subscription(message.bot, user_id)
-        logger.debug(f"Subscription check in handle_requests_back_button: user_id={user_id}, is_subscribed={is_subscribed}, bot_active={bot_active}")
+        success, bot_active, is_subscribed = await check_subscription(message.bot, user_id, state.storage)
+        logger.debug(f"check_subscription в handle_requests_back_button: user_id={user_id}, success={success}, is_subscribed={is_subscribed}")
         if not is_subscribed and role != ADMIN_ROLE:
             await message.answer(
-                "Сизда фаол обуна мавжуд эмас. 'Обуна' тугмасини босинг:",
-                reply_markup=make_keyboard(["Обуна"], one_time=True)
+                "Сизда фаол обуна мавжуд эмас. Админ билан боғланинг (@ad_mbozor).",
+                reply_markup=get_main_menu(role)
             )
             await state.set_state("Registration:subscription")
-            logger.info(f"User {user_id} redirected to subscription from handle_requests_back_button")
+            logger.info(f"Пользователь {user_id} перенаправлен на подписку")
             return
         await message.answer("Асосий меню:", reply_markup=get_main_menu(role))
         await state.clear()
-        logger.info(f"Пользователь {user_id} вернулся в главное меню из подменю 'Менинг сўровларим'")
+        logger.info(f"Пользователь {user_id} вернулся в главное меню")
     except Exception as e:
         logger.error(f"Ошибка в handle_requests_back_button для user_id={user_id}: {e}", exc_info=True)
         await notify_admin(f"Ошибка в handle_requests_back_button для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Хатолик юз берди! Админ билан боғланинг (@MSMA_UZ).", reply_markup=get_main_menu(role))
+        await message.answer(
+            "Хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=get_main_menu(role)
+        )
         await state.clear()
 
 @buyer_only
 async def process_requests_menu(message: types.Message, state: FSMContext, role: str):
     user_id = message.from_user.id
-    current_state = await state.get_state()
-    normalized_text = normalize_text(message.text)
-    logger.debug(f"process_requests_menu: user_id={user_id}, text='{normalized_text}', state={current_state}")
-    if current_state != RequestsMenu.menu.state:
-        logger.warning(f"Unexpected state for process_requests_menu: user_id={user_id}, state={current_state}")
-        await state.clear()
-        await message.answer("Менинг сўровларим:", reply_markup=get_requests_menu())
-        await state.set_state(RequestsMenu.menu)
-        return
+    logger.debug(f"process_requests_menu: user_id={user_id}, text='{message.text}'")
     if message.text.startswith('/'):
-        logger.debug(f"Игнорируется команда '{message.text}' в состоянии RequestsMenu.menu для user_id={user_id}")
+        logger.debug(f"Игнорируется команда '{message.text}' для user_id={user_id}")
         return
     options = {
-        "сўровлар рўйхати": (get_requests_menu(), requests_list, "просмотрел список сўровларим"),
-        "сўров қўшиш": (None, add_request_start, "начал добавление сўров"),
-        "сўровни ўчириш": (None, requests_delete_start, "начал удаление сўров"),
-        "сўровни ёпиш": (None, close_request_start, "начал закрытие сўров")
+        "Сўровлар рўйхати": (None, requests_list, "просмотрел список сўровларим"),
+        "Сўровни ўчириш": (None, requests_delete_start, "начал удаление сўров"),
+        "Сўровни ёпиш": (None, close_request_start, "начал закрытие сўров")
     }
-    option = options.get(normalized_text)
+    option = options.get(message.text)
     if option:
-        logger.debug(f"process_requests_menu: user_id={user_id}, selected option='{normalized_text}', expected_state='RequestsMenu:menu'")
         try:
             if option[1]:
-                await option[1](message, state)
+                await option[1](message, state, role)
             if option[0]:
                 await message.answer("Менинг сўровларим:", reply_markup=option[0])
-            if not option[1] or option[2].startswith("просмотрел"):
                 await state.set_state(RequestsMenu.menu)
             logger.info(f"Пользователь {user_id} {option[2]}")
+        except aiosqlite.Error as e:
+            logger.error(f"Ошибка базы данных в process_requests_menu, опция={message.text}: {e}", exc_info=True)
+            await notify_admin(f"Ошибка базы данных в process_requests_menu для user_id={user_id}, опция={message.text}: {str(e)}", bot=message.bot)
+            await message.answer(
+                "Хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+                reply_markup=get_requests_menu()
+            )
+            await state.set_state(RequestsMenu.menu)
         except Exception as e:
-            logger.error(f"Ошибка в process_requests_menu для user_id={user_id}, option={normalized_text}: {e}", exc_info=True)
-            await notify_admin(f"Ошибка в process_requests_menu для user_id={user_id}: {str(e)}", bot=message.bot)
-            await message.answer("Хатолик юз берди! Админ билан боғланинг (@MSMA_UZ).", reply_markup=get_requests_menu())
+            logger.error(f"Непредвиденная ошибка в process_requests_menu, опция={message.text}: {e}", exc_info=True)
+            await notify_admin(f"Непредвиденная ошибка в process_requests_menu для user_id={user_id}, опция={message.text}: {str(e)}", bot=message.bot)
+            await message.answer(
+                "Хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+                reply_markup=get_requests_menu()
+            )
             await state.set_state(RequestsMenu.menu)
     else:
-        logger.warning(f"Неверный выбор в process_requests_menu: user_id={user_id}, text='{normalized_text}', state={current_state}")
+        logger.warning(f"Некорректный выбор в process_requests_menu: user_id={user_id}, text='{message.text}'")
         await message.answer("Илтимос, менюдан танланг:", reply_markup=get_requests_menu())
-        await state.set_state(RequestsMenu.menu)
-
-@buyer_only
-async def add_request_start(message: types.Message, state: FSMContext, role: str):
-    user_id = message.from_user.id
-    current_state = await state.get_state()
-    logger.debug(f"add_request_start: user_id={user_id}, text='{message.text}', state={current_state}")
-    if current_state != RequestsMenu.menu.state:
-        logger.warning(f"Unexpected state for add_request_start: user_id={user_id}, state={current_state}")
-        await state.clear()
-        await message.answer("Менинг сўровларим:", reply_markup=get_requests_menu())
-        await state.set_state(RequestsMenu.menu)
-        return
-    try:
-        await message.answer("Маҳсулот турини танланг:", reply_markup=make_keyboard(CATEGORIES, columns=2, with_back=True))
-        await state.set_state(AddRequest.category)
-        logger.info(f"Пользователь {user_id} начал добавление запроса из 'Менинг сўровларим'")
-    except Exception as e:
-        logger.error(f"Ошибка в add_request_start для user_id={user_id}: {e}", exc_info=True)
-        await notify_admin(f"Ошибка в add_request_start для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Хатолик юз берди! Админ билан боғланинг (@MSMA_UZ).", reply_markup=get_requests_menu())
         await state.set_state(RequestsMenu.menu)
 
 @buyer_only
 async def process_category(message: types.Message, state: FSMContext, role: str):
     user_id = message.from_user.id
+    category = message.text
+    logger.debug(f"process_category: user_id={user_id}, text='{category}'")
     current_state = await state.get_state()
-    normalized_text = normalize_text(message.text)
-    logger.debug(f"process_category: user_id={user_id}, text='{normalized_text}', state={current_state}")
-    if current_state not in [SendRequest.category.state, AddRequest.category.state]:
-        logger.warning(f"Unexpected state for process_category: user_id={user_id}, state={current_state}")
-        await state.clear()
-        await message.answer("Менинг сўровларим:", reply_markup=get_requests_menu())
-        await state.set_state(RequestsMenu.menu)
-        return
-    back_menu = get_requests_menu() if current_state.startswith("AddRequest") else get_main_menu(role)
-    back_state = RequestsMenu.menu if current_state.startswith("AddRequest") else None
+    back_menu = get_main_menu(role)
+    back_state = None
     try:
-        if normalized_text == "орқага":
-            await message.answer("Менинг сўровларим:" if current_state.startswith("AddRequest") else "Асосий меню:", reply_markup=back_menu)
-            await state.set_state(back_state) if back_state else await state.clear()
+        if category == "Орқага":
+            await message.answer(
+                "Асосий меню:", reply_markup=back_menu
+            )
+            await state.clear()
             logger.info(f"Пользователь {user_id} вернулся из выбора категории")
             return
-        category = message.text.strip()
         if category not in CATEGORIES:
-            await message.answer("Нотўғри категория! Рўйхатдан танланг:", reply_markup=make_keyboard(CATEGORIES, columns=2, with_back=True))
-            logger.warning(f"Неверная категория от {user_id}: {category}")
+            await message.answer(
+                "Илтимос, категориядан танланг:",
+                reply_markup=make_keyboard(CATEGORIES, columns=2, with_back=True)
+            )
+            logger.warning(f"Некорректная категория от user_id={user_id}: {category}")
             return
         await state.update_data(category=category)
-        await message.answer("Маҳсулот сортни киритинг:", reply_markup=make_keyboard(["Орқага"], columns=1, one_time=True))
-        await state.set_state(SendRequest.sort if current_state.startswith("SendRequest") else AddRequest.sort)
-        logger.debug(f"Пользователь {user_id} выбрал категорию: {category}")
+        await message.answer(
+            "Маҳсулот сортни киритинг:",
+            reply_markup=make_keyboard([], with_back=True)
+        )
+        await state.set_state(SendRequest.sort)
+        logger.info(f"Пользователь {user_id} выбрал категорию: {category}")
     except Exception as e:
         logger.error(f"Ошибка в process_category для user_id={user_id}: {e}", exc_info=True)
         await notify_admin(f"Ошибка в process_category для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Хатолик юз берди! Админ билан боғланинг (@MSMA_UZ).", reply_markup=get_requests_menu())
+        await message.answer(
+            "Хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=get_requests_menu()
+        )
         await state.set_state(RequestsMenu.menu)
 
 @buyer_only
 async def process_sort(message: types.Message, state: FSMContext, role: str):
     user_id = message.from_user.id
+    sort = message.text
     current_state = await state.get_state()
-    normalized_text = normalize_text(message.text)
-    back_state = AddRequest.category if current_state.startswith("AddRequest") else SendRequest.category
-    logger.debug(f"process_sort: user_id={user_id}, text='{normalized_text}', state={current_state}")
-    if current_state not in [SendRequest.sort.state, AddRequest.sort.state]:
-        logger.warning(f"Unexpected state for process_sort: user_id={user_id}, state={current_state}")
-        await state.clear()
-        await message.answer("Менинг сўровларим:", reply_markup=get_requests_menu())
-        await state.set_state(RequestsMenu.menu)
-        return
+    back_state = SendRequest.category
+    logger.debug(f"process_sort: user_id={user_id}, text='{sort}'")
     try:
-        if normalized_text == "орқага":
-            await message.answer("Маҳсулот турини танланг:", reply_markup=make_keyboard(CATEGORIES, columns=2, with_back=True))
+        if sort == "Орқага":
+            await message.answer(
+                "Маҳсулот турини танланг:",
+                reply_markup=make_keyboard(CATEGORIES, columns=2, with_back=True)
+            )
             await state.set_state(back_state)
-            logger.info(f"Пользователь {user_id} вернулся к выбору категории из сорта")
+            logger.info(f"Пользователь {user_id} вернулся к выбору категории")
             return
-        sort = message.text.strip()
-        if len(sort) > MAX_SORT_LENGTH:
-            await message.answer(f"Сорт {MAX_SORT_LENGTH} белгидан узун бўлмаслиги керак. Қайта киритинг:")
-            logger.warning(f"Сорт слишком длинный от {user_id}: {len(sort)} символов")
+        if not await validate_sort(sort):
+            await message.answer(f"Сорт {MAX_SORT_LENGTH} белгидан узун бўлмаслиги керак:")
+            logger.warning(f"Сорт слишком длинный от user_id={user_id}: {len(sort)}")
             return
         await state.update_data(sort=sort)
-        await message.answer("Вилоятни танланг:", reply_markup=make_keyboard(get_all_regions(), columns=2, with_back=True))
-        await state.set_state(SendRequest.region if current_state.startswith("SendRequest") else AddRequest.region)
-        logger.debug(f"Пользователь {user_id} ввёл сорт: {sort}")
+        regions = get_all_regions() + ["Бутун Ўзбекистон"]
+        if not regions:
+            await message.answer(
+                "Вилоятлар рўйхати бўш. Админ билан боғланинг (@ad_mbozor).",
+                reply_markup=get_requests_menu()
+            )
+            await state.set_state(RequestsMenu.menu)
+            logger.warning(f"Пустой список регионов для user_id={user_id}")
+            return
+        await message.answer(
+            "Вилоятни танланг:",
+            reply_markup=make_keyboard(regions, columns=2, with_back=True)
+        )
+        await state.set_state(SendRequest.region)
+        logger.info(f"Пользователь {user_id} ввёл сорт: {sort}")
     except Exception as e:
         logger.error(f"Ошибка в process_sort для user_id={user_id}: {e}", exc_info=True)
         await notify_admin(f"Ошибка в process_sort для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Хатолик юз берди! Админ билан боғланинг (@MSMA_UZ).", reply_markup=get_requests_menu())
+        await message.answer(
+            "Хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=get_requests_menu()
+        )
         await state.set_state(RequestsMenu.menu)
 
 @buyer_only
 async def process_region(message: types.Message, state: FSMContext, role: str):
     user_id = message.from_user.id
+    region = message.text
     current_state = await state.get_state()
-    normalized_text = normalize_text(message.text)
-    logger.debug(f"process_region: user_id={user_id}, text='{normalized_text}', state={current_state}")
-    if current_state not in [SendRequest.region.state, AddRequest.region.state]:
-        logger.warning(f"Unexpected state for process_region: user_id={user_id}, state={current_state}")
-        await state.clear()
-        await message.answer("Менинг сўровларим:", reply_markup=get_requests_menu())
-        await state.set_state(RequestsMenu.menu)
-        return
+    back_state = SendRequest.sort
+    logger.debug(f"process_region: user_id={user_id}, text='{region}'")
     try:
-        if normalized_text == "орқага":
-            await message.answer("Маҳсулот сортни киритинг:", reply_markup=make_keyboard(["Орқага"], columns=1, one_time=True))
-            await state.set_state(SendRequest.sort if current_state.startswith("SendRequest") else AddRequest.sort)
-            logger.info(f"Пользователь {user_id} вернулся к вводу сорта из региона")
+        if region == "Орқага":
+            await message.answer(
+                "Маҳсулот сортни киритинг:",
+                reply_markup=make_keyboard([], with_back=True)
+            )
+            await state.set_state(back_state)
+            logger.info(f"Пользователь {user_id} вернулся к вводу сорта")
             return
-        region = message.text.strip()
-        if region not in get_all_regions():
-            await message.answer("Нотўғри область! Рўйхатдан танланг:", reply_markup=make_keyboard(get_all_regions(), columns=2, with_back=True))
-            logger.warning(f"Неверный регион от {user_id}: {region}")
+        regions = get_all_regions() + ["Бутун Ўзбекистон"]
+        if region not in regions:
+            await message.answer(
+                "Илтимос, рўйхатдан вилоят танланг:",
+                reply_markup=make_keyboard(regions, columns=2, with_back=True)
+            )
+            logger.warning(f"Некорректный регион от user_id={user_id}: {region}")
             return
         await state.update_data(region=region)
-        await message.answer("Маҳсулот ҳажмни киритинг (тоннада):", reply_markup=make_keyboard(["Орқага"], columns=1, one_time=True))
-        await state.set_state(SendRequest.volume_ton if current_state.startswith("SendRequest") else AddRequest.volume_ton)
-        logger.debug(f"Пользователь {user_id} выбрал регион: {region}")
+        await message.answer(
+            "Маҳсулот ҳажмни киритинг (тоннада):",
+            reply_markup=make_keyboard([], with_back=True)
+        )
+        await state.set_state(SendRequest.volume_ton)
+        logger.info(f"Пользователь {user_id} выбрал регион: {region}")
     except Exception as e:
         logger.error(f"Ошибка в process_region для user_id={user_id}: {e}", exc_info=True)
         await notify_admin(f"Ошибка в process_region для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Хатолик юз берди! Админ билан боғланинг (@MSMA_UZ).", reply_markup=get_requests_menu())
+        await message.answer(
+            "Хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=get_requests_menu()
+        )
         await state.set_state(RequestsMenu.menu)
 
 @buyer_only
 async def process_volume_ton(message: types.Message, state: FSMContext, role: str):
     user_id = message.from_user.id
+    volume = message.text
     current_state = await state.get_state()
-    normalized_text = normalize_text(message.text)
-    back_state = SendRequest.region if current_state.startswith("SendRequest") else AddRequest.region
-    logger.debug(f"process_volume_ton: user_id={user_id}, text='{normalized_text}', state={current_state}")
-    if current_state not in [SendRequest.volume_ton.state, AddRequest.volume_ton.state]:
-        logger.warning(f"Unexpected state for process_volume_ton: user_id={user_id}, state={current_state}")
-        await state.clear()
-        await message.answer("Менинг сўровларим:", reply_markup=get_requests_menu())
-        await state.set_state(RequestsMenu.menu)
-        return
+    back_state = SendRequest.region
+    logger.debug(f"process_volume_ton: user_id={user_id}, text='{volume}'")
     try:
-        if normalized_text == "орқага":
-            await message.answer("Вилоятни танланг:", reply_markup=make_keyboard(get_all_regions(), columns=2, with_back=True))
+        if volume == "Орқага":
+            regions = get_all_regions() + ["Бутун Ўзбекистон"]
+            await message.answer(
+                "Вилоятни танланг:",
+                reply_markup=make_keyboard(regions, columns=2, with_back=True)
+            )
             await state.set_state(back_state)
-            logger.info(f"Пользователь {user_id} вернулся к выбору региона из объёма")
+            logger.info(f"Пользователь {user_id} вернулся к выбору региона")
             return
-        valid, volume_ton = validate_number(message.text, min_value=0)
-        if not valid or volume_ton > MAX_VOLUME_TON:
+        valid, volume_ton = await validate_number_minimal(volume)
+        if not valid or volume_ton <= 0 or volume_ton > MAX_VOLUME_TON:
             await message.answer(f"Ҳажм мусбат рақам бўлиши ва {MAX_VOLUME_TON} тоннадан ошмаслиги керак:")
-            logger.warning(f"Неверный объём от {user_id}: {message.text}")
+            logger.warning(f"Некорректный объём от user_id={user_id}: {volume}")
             return
         await state.update_data(volume_ton=volume_ton)
-        await message.answer("Нархни киритинг (сўмда):", reply_markup=make_keyboard(["Орқага"], columns=1, one_time=True))
-        await state.set_state(SendRequest.price if current_state.startswith("SendRequest") else AddRequest.price)
-        logger.debug(f"Пользователь {user_id} ввёл объём: {volume_ton} тонн")
+        await message.answer(
+            "Нархни киритинг (сўмда):",
+            reply_markup=make_keyboard([], with_back=True)
+        )
+        await state.set_state(SendRequest.price)
+        logger.info(f"Пользователь {user_id} ввёл объём: {volume_ton} тонн")
     except Exception as e:
         logger.error(f"Ошибка в process_volume_ton для user_id={user_id}: {e}", exc_info=True)
         await notify_admin(f"Ошибка в process_volume_ton для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Хатолик юз берди! Админ билан боғланинг (@MSMA_UZ).", reply_markup=get_requests_menu())
+        await message.answer(
+            "Хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=get_requests_menu()
+        )
         await state.set_state(RequestsMenu.menu)
 
 @buyer_only
 async def process_price(message: types.Message, state: FSMContext, role: str):
     user_id = message.from_user.id
+    price = message.text
     current_state = await state.get_state()
-    normalized_text = normalize_text(message.text)
-    back_state = SendRequest.volume_ton if current_state.startswith("SendRequest") else AddRequest.volume_ton
-    finish_menu = get_main_menu(role) if current_state.startswith("SendRequest") else get_requests_menu()
-    finish_state = None if current_state.startswith("SendRequest") else RequestsMenu.menu
-    logger.debug(f"process_price: user_id={user_id}, text='{normalized_text}', state={current_state}")
-    if current_state not in [SendRequest.price.state, AddRequest.price.state]:
-        logger.warning(f"Unexpected state for process_price: user_id={user_id}, state={current_state}")
-        await state.clear()
-        await message.answer("Менинг сўровларим:", reply_markup=get_requests_menu())
-        await state.set_state(RequestsMenu.menu)
-        return
+    back_state = SendRequest.volume_ton
+    finish_menu = get_main_menu(role)
+    finish_state = None
+    logger.debug(f"process_price: user_id={user_id}, text='{price}'")
     try:
-        if normalized_text == "орқага":
-            await message.answer("Маҳсулот ҳажмни киритинг (тоннада):", reply_markup=make_keyboard(["Орқага"], columns=1, one_time=True))
+        if price == "Орқага":
+            await message.answer(
+                "Маҳсулот ҳажмни киритинг (тоннада):",
+                reply_markup=make_keyboard([], with_back=True)
+            )
             await state.set_state(back_state)
-            logger.info(f"Пользователь {user_id} вернулся к вводу объёма из цены")
+            logger.info(f"Пользователь {user_id} вернулся к вводу объёма")
             return
-        valid, price = validate_number(message.text, min_value=0)
-        if not valid or price > 1_000_000_000:
+        valid, price_value = await validate_number_minimal(price)
+        if not valid or price_value <= 0 or price_value > 1_000_000_000:
             await message.answer("Нарх мусбат рақам бўлиши ва 1 миллиард сумдан ошмаслиги керак:")
-            logger.warning(f"Неверная цена от {user_id}: {message.text}")
+            logger.warning(f"Некорректная цена от user_id={user_id}: {price}")
             return
         data = await state.get_data()
-        item_id = await generate_item_id("requests", "S")
-        created_at = format_uz_datetime(datetime.now())
-        async with aiosqlite.connect(DB_NAME) as conn:
+        async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
+            async with conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='requests'"
+            ) as cursor:
+                if not await cursor.fetchone():
+                    raise aiosqlite.Error("Table 'requests' does not exist")
+            async with conn.execute(
+                "SELECT unique_id FROM requests WHERE user_id = ? AND category = ? AND sort = ? AND region = ? AND status = 'active'",
+                (user_id, data["category"], data["sort"], data["region"])
+            ) as cursor:
+                if await cursor.fetchone():
+                    await message.answer("Бундай сўров аллақачон мавжуд!", reply_markup=finish_menu)
+                    await state.clear()
+                    logger.warning(f"Дубликат запроса для user_id={user_id}: category={data['category']}, sort={data['sort']}, region={data['region']}")
+                    return
+            item_id = await generate_item_id("requests", "S")
+            created_at = format_uz_datetime(datetime.now(pytz.UTC))
             await conn.execute(
                 "INSERT INTO requests (unique_id, user_id, category, region, sort, volume_ton, price, status, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)",
-                (item_id, user_id, data["category"], data["region"], data["sort"], data["volume_ton"], price, created_at)
+                (item_id, user_id, data["category"], data["region"], data["sort"], data["volume_ton"], price_value, created_at)
             )
             await conn.commit()
-
         info = (
             f"Сўров {item_id}\n"
             f"Категория: {data['category']}\n"
             f"Сорт: {data['sort']}\n"
             f"Вилоят: {data['region']}\n"
             f"Ҳажм: {data['volume_ton']} тонна\n"
-            f"Нарх: {price} сум"
+            f"Нарх: {price_value:,.0f} сўм"
         )
-        channel_msg = None
         try:
             channel_msg = await message.bot.send_message(chat_id=CHANNEL_ID, text=info)
-            logger.debug(f"Сўров {item_id} отправлен в канал, message_id={channel_msg.message_id}")
-        except types.TelegramError as e:
-            logger.error(f"Ошибка отправки сўрова {item_id} в канал: {e}")
-            for admin_id in ADMIN_IDS:
-                await message.bot.send_message(admin_id, f"Сўров {item_id} канлага юборилмади: {e}")
-            await message.answer("Сўров каналга юборилмади. Админ билан боғланинг.", reply_markup=finish_menu)
-            await state.set_state(finish_state) if finish_state else await state.clear()
-            return
-
-        try:
-            async with aiosqlite.connect(DB_NAME) as conn:
-                await conn.execute("UPDATE requests SET channel_message_id = ? WHERE unique_id = ?",
-                                  (channel_msg.message_id, item_id))
+            async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
+                await conn.execute(
+                    "UPDATE requests SET channel_message_id = ? WHERE unique_id = ?",
+                    (channel_msg.message_id, item_id)
+                )
                 await conn.commit()
-        except aiosqlite.Error as e:
-            logger.error(f"Ошибка обновления channel_message_id для {item_id}: {e}")
-            for admin_id in ADMIN_IDS:
-                await message.bot.send_message(admin_id, f"Сўров {item_id} каналга юборилди, лекин базада хатолик: {e}")
-
+            logger.info(f"Запрос {item_id} отправлен в канал, message_id={channel_msg.message_id}")
+        except Exception as e:
+            logger.error(f"Ошибка отправки запроса {item_id} в канал: {e}", exc_info=True)
+            await notify_admin(f"Ошибка отправки запроса {item_id} в канал для user_id={user_id}: {str(e)}", bot=message.bot)
+            await message.answer(
+                "Сўров каналга юборилмади. Админ билан боғланинг (@ad_mbozor).",
+                reply_markup=finish_menu
+            )
+            await state.clear()
+            return
         await message.answer(
             f"Сизнинг сўровингиз юборилди. Сўров рақами {item_id}. Танишиш учун Сўровлар доскаси ёки <a href=\"https://t.me/+6WXzyGqqotgzODM6\">Каналга</a> ўтинг.",
             reply_markup=finish_menu,
             parse_mode="HTML"
         )
-        await state.set_state(finish_state) if finish_state else await state.clear()
-        logger.info(f"Сўров {item_id} успешно добавлен пользователем {user_id}")
+        await state.clear()
+        logger.info(f"Пользователь {user_id} добавил запрос {item_id}")
     except aiosqlite.Error as e:
-        logger.error(f"Ошибка базы данных при добавлении сўрова {item_id or 'unknown'}: {e}", exc_info=True)
-        await notify_admin(f"Ошибка базы данных при добавлении сўрова {item_id or 'unknown'} для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Сўровни қўшишда хатолик юз берди! Админга хабар беринг.", reply_markup=finish_menu)
-        await state.set_state(finish_state) if finish_state else await state.clear()
+        logger.error(f"Ошибка базы данных при добавлении запроса {item_id or 'неизвестно'}: {e}", exc_info=True)
+        await notify_admin(f"Ошибка базы данных при добавлении запроса для user_id={user_id}: {str(e)}", bot=message.bot)
+        await message.answer(
+            "Сўровни қўшишда хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=finish_menu
+        )
+        await state.clear()
     except Exception as e:
-        logger.error(f"Неожиданная ошибка в process_price для user_id={user_id}: {e}", exc_info=True)
-        await notify_admin(f"Неожиданная ошибка в process_price для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Хатолик юз берди! Админ билан боғланинг (@MSMA_UZ).", reply_markup=get_requests_menu())
+        logger.error(f"Непредвиденная ошибка в process_price для user_id={user_id}: {e}", exc_info=True)
+        await notify_admin(f"Непредвиденная ошибка в process_price для user_id={user_id}: {str(e)}", bot=message.bot)
+        await message.answer(
+            "Хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=get_requests_menu()
+        )
         await state.set_state(RequestsMenu.menu)
 
 @buyer_only
 async def requests_list(message: types.Message, state: FSMContext, role: str):
     user_id = message.from_user.id
-    current_state = await state.get_state()
-    logger.debug(f"requests_list: user_id={user_id}, text='{message.text}', state={current_state}")
-    if current_state != RequestsMenu.menu.state:
-        logger.warning(f"Unexpected state for requests_list: user_id={user_id}, state={current_state}")
-        await state.clear()
-        await message.answer("Менинг сўровларим:", reply_markup=get_requests_menu())
-        await state.set_state(RequestsMenu.menu)
-        return
+    logger.debug(f"requests_list: user_id={user_id}, text='{message.text}'")
     try:
-        async with aiosqlite.connect(DB_NAME) as conn:
+        async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
             async with conn.execute(
-                    "SELECT unique_id, category, region, sort, volume_ton, price, created_at "
-                    "FROM requests WHERE user_id = ? AND status = 'active'", (user_id,)
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='requests'"
+            ) as cursor:
+                if not await cursor.fetchone():
+                    raise aiosqlite.Error("Table 'requests' does not exist")
+            async with conn.execute(
+                "SELECT unique_id, category, region, sort, volume_ton, price, created_at "
+                "FROM requests WHERE user_id = ? AND status = 'active'",
+                (user_id,)
             ) as cursor:
                 requests = await cursor.fetchall()
         if not requests:
@@ -459,7 +509,7 @@ async def requests_list(message: types.Message, state: FSMContext, role: str):
         for unique_id, category, region, sort, volume_ton, price, created_at in requests:
             created_at_dt = parse_uz_datetime(created_at)
             if not created_at_dt:
-                logger.warning(f"Неверный формат created_at для сўрова {unique_id}: {created_at}")
+                logger.warning(f"Некорректный формат created_at для запроса {unique_id}: {created_at}")
                 continue
             expiration = created_at_dt + timedelta(hours=24)
             status = "Фаол" if now < expiration else "Муддати тугаган"
@@ -469,38 +519,44 @@ async def requests_list(message: types.Message, state: FSMContext, role: str):
                 f"Сорт: {sort}\n"
                 f"Вилоят: {region}\n"
                 f"Ҳажм: {volume_ton} тонна\n"
-                f"Нарх: {price} сум\n"
+                f"Нарх: {price:,.0f} сўм\n"
                 f"Ҳолат: {status} ({format_uz_datetime(expiration)} гача)"
             )
             await message.answer(info)
-        await message.answer("Менинг сўровларим:", reply_markup=get_requests_menu())
         await state.set_state(RequestsMenu.menu)
-        logger.info(f"Пользователь {user_id} просмотрел список своих запросов")
+        logger.info(f"Пользователь {user_id} просмотрел список запросов")
     except aiosqlite.Error as e:
-        logger.error(f"Ошибка загрузки списка сўровларим для user_id={user_id}: {e}", exc_info=True)
-        await notify_admin(f"Ошибка загрузки списка сўровларим для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Сўровлар рўйхатини юклашда хатолик юз берди!", reply_markup=get_requests_menu())
+        logger.error(f"Ошибка базы данных в requests_list для user_id={user_id}: {e}", exc_info=True)
+        await notify_admin(f"Ошибка базы данных в requests_list для user_id={user_id}: {str(e)}", bot=message.bot)
+        await message.answer(
+            "Сўровлар рўйхатини юклашда хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=get_requests_menu()
+        )
         await state.set_state(RequestsMenu.menu)
     except Exception as e:
-        logger.error(f"Неожиданная ошибка в requests_list для user_id={user_id}: {e}", exc_info=True)
-        await notify_admin(f"Неожиданная ошибка в requests_list для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Хатолик юз берди! Админ билан боғланинг (@MSMA_UZ).", reply_markup=get_requests_menu())
+        logger.error(f"Непредвиденная ошибка в requests_list для user_id={user_id}: {e}", exc_info=True)
+        await notify_admin(f"Непредвиденная ошибка в requests_list для user_id={user_id}: {str(e)}", bot=message.bot)
+        await message.answer(
+            "Хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=get_requests_menu()
+        )
         await state.set_state(RequestsMenu.menu)
 
 @buyer_only
 async def requests_delete_start(message: types.Message, state: FSMContext, role: str):
     user_id = message.from_user.id
-    current_state = await state.get_state()
-    logger.debug(f"requests_delete_start: user_id={user_id}, text='{message.text}', state={current_state}")
-    if current_state != RequestsMenu.menu.state:
-        logger.warning(f"Unexpected state for requests_delete_start: user_id={user_id}, state={current_state}")
-        await state.clear()
-        await message.answer("Менинг сўровларим:", reply_markup=get_requests_menu())
-        await state.set_state(RequestsMenu.menu)
-        return
+    logger.debug(f"requests_delete_start: user_id={user_id}, text='{message.text}'")
     try:
-        async with aiosqlite.connect(DB_NAME) as conn:
-            async with conn.execute("SELECT unique_id FROM requests WHERE user_id = ? AND status = 'active'", (user_id,)) as cursor:
+        async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
+            async with conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='requests'"
+            ) as cursor:
+                if not await cursor.fetchone():
+                    raise aiosqlite.Error("Table 'requests' does not exist")
+            async with conn.execute(
+                "SELECT unique_id FROM requests WHERE user_id = ? AND status = 'active'",
+                (user_id,)
+            ) as cursor:
                 requests = await cursor.fetchall()
         if not requests:
             await message.answer("Ўчириш учун сўровлар йўқ.", reply_markup=get_requests_menu())
@@ -508,56 +564,86 @@ async def requests_delete_start(message: types.Message, state: FSMContext, role:
             logger.info(f"Пользователь {user_id} не имеет запросов для удаления")
             return
         request_ids = [r[0] for r in requests]
-        await message.answer("Ўчириш учун сўров танланг:",
-                             reply_markup=make_keyboard(request_ids, columns=2, with_back=True))
+        await message.answer(
+            "Ўчириш учун сўров танланг:",
+            reply_markup=make_keyboard(request_ids, columns=2, with_back=True)
+        )
         await state.set_state(DeleteRequest.delete_request)
-        logger.info(f"Пользователь {user_id} начал процесс удаления запроса")
+        logger.info(f"Пользователь {user_id} начал удаление запроса")
     except aiosqlite.Error as e:
-        logger.error(f"Ошибка загрузки сўровларим для удаления для user_id={user_id}: {e}", exc_info=True)
-        await notify_admin(f"Ошибка загрузки сўровларим для удаления для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Сўровларни юклашда хатолик юз берди!", reply_markup=get_requests_menu())
+        logger.error(f"Ошибка базы данных в requests_delete_start для user_id={user_id}: {e}", exc_info=True)
+        await notify_admin(f"Ошибка базы данных в requests_delete_start для user_id={user_id}: {str(e)}", bot=message.bot)
+        await message.answer(
+            "Сўровларни юклашда хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=get_requests_menu()
+        )
         await state.set_state(RequestsMenu.menu)
     except Exception as e:
-        logger.error(f"Неожиданная ошибка в requests_delete_start для user_id={user_id}: {e}", exc_info=True)
-        await notify_admin(f"Неожиданная ошибка в requests_delete_start для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Хатолик юз берди! Админ билан боғланинг (@MSMA_UZ).", reply_markup=get_requests_menu())
+        logger.error(f"Непредвиденная ошибка в requests_delete_start для user_id={user_id}: {e}", exc_info=True)
+        await notify_admin(f"Непредвиденная ошибка в requests_delete_start для user_id={user_id}: {str(e)}", bot=message.bot)
+        await message.answer(
+            "Хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=get_requests_menu()
+        )
         await state.set_state(RequestsMenu.menu)
 
 @buyer_only
 async def process_delete_request(message: types.Message, state: FSMContext, role: str):
     user_id = message.from_user.id
-    normalized_text = normalize_text(message.text)
-    current_state = await state.get_state()
-    logger.debug(f"process_delete_request: user_id={user_id}, text='{normalized_text}', state={current_state}")
-    if current_state != DeleteRequest.delete_request.state:
-        logger.warning(f"Unexpected state for process_delete_request: user_id={user_id}, state={current_state}")
-        await state.set_state(RequestsMenu.menu)
-        await message.answer("Менинг сўровларим:", reply_markup=get_requests_menu())
-        return
+    item_id = message.text
+    logger.debug(f"process_delete_request: user_id={user_id}, text='{item_id}'")
     try:
-        if normalized_text == "орқага":
+        async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
+            async with conn.execute(
+                "SELECT unique_id FROM requests WHERE user_id = ? AND status = 'active'",
+                (user_id,)
+            ) as cursor:
+                requests = [row[0] for row in await cursor.fetchall()]
+        if item_id == "Орқага":
             await message.answer("Менинг сўровларим:", reply_markup=get_requests_menu())
             await state.set_state(RequestsMenu.menu)
-            logger.info(f"Пользователь {user_id} вернулся в меню сўровларим из удаления")
+            logger.info(f"Пользователь {user_id} вернулся в меню сўровларим")
             return
-        item_id = message.text.strip()
-        async with aiosqlite.connect(DB_NAME) as conn:
+        if item_id not in requests:
+            await message.answer(
+                "Илтимос, рўйхатдан сўров танланг:",
+                reply_markup=make_keyboard(requests, columns=2, with_back=True)
+            )
+            logger.warning(f"Некорректный выбор запроса для удаления: {item_id}")
+            return
+        async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
             async with conn.execute(
                 "SELECT channel_message_id FROM requests WHERE unique_id = ? AND user_id = ? AND status = 'active'",
                 (item_id, user_id)
             ) as cursor:
                 request = await cursor.fetchone()
             if not request:
-                await message.answer(f"Сўров {item_id} топилмади ёки у сизга тегишли эмас!", reply_markup=get_requests_menu())
+                await message.answer(
+                    f"Сўров {item_id} топилмади ёки у сизга тегишли эмас!",
+                    reply_markup=get_requests_menu()
+                )
                 await state.set_state(RequestsMenu.menu)
-                logger.warning(f"Пользователь {user_id} пытался удалить несуществующий/чужой сўров {item_id}")
+                logger.warning(f"Запрос {item_id} не найден для user_id={user_id}")
                 return
             if request[0]:
                 try:
                     await message.bot.delete_message(chat_id=CHANNEL_ID, message_id=request[0])
-                    logger.debug(f"Сообщение {request[0]} удалено из канала {CHANNEL_ID}")
+                    logger.debug(f"Сообщение {request[0]} удалено из канала")
+                except TelegramBadRequest as e:
+                    if "message can't be deleted" in str(e) or "message to delete not found" in str(e):
+                        logger.warning(f"Сообщение {request[0]} для запроса {item_id} уже удалено или не найдено: {e}")
+                        await conn.execute(
+                            "UPDATE requests SET channel_message_id = NULL WHERE unique_id = ? AND user_id = ?",
+                            (item_id, user_id)
+                        )
+                        await conn.commit()
+                        logger.info(f"Сброшено channel_message_id для запроса {item_id}")
+                    else:
+                        logger.error(f"Не удалось удалить сообщение {request[0]} для запроса {item_id}: {e}", exc_info=True)
+                        await notify_admin(f"Не удалось удалить сообщение {request[0]} для запроса {item_id}: {str(e)}", bot=message.bot)
                 except Exception as e:
-                    logger.warning(f"Не удалось удалить сообщение {request[0]} из канала: {e}")
+                    logger.warning(f"Не удалось удалить сообщение {request[0]}: {e}", exc_info=True)
+                    await notify_admin(f"Не удалось удалить сообщение {request[0]} для запроса {item_id}: {str(e)}", bot=message.bot)
             await conn.execute(
                 "UPDATE requests SET status = 'deleted' WHERE unique_id = ? AND user_id = ?",
                 (item_id, user_id)
@@ -565,31 +651,35 @@ async def process_delete_request(message: types.Message, state: FSMContext, role
             await conn.commit()
         await message.answer(f"Сўров {item_id} ўчирилди!", reply_markup=get_requests_menu())
         await state.set_state(RequestsMenu.menu)
-        logger.info(f"Пользователь {user_id} успешно удалил сўров {item_id}")
+        logger.info(f"Пользователь {user_id} удалил запрос {item_id}")
     except aiosqlite.Error as e:
-        logger.error(f"Ошибка базы данных при удалении сўрова {item_id or 'unknown'} для user_id={user_id}: {e}", exc_info=True)
-        await notify_admin(f"Ошибка базы данных при удалении сўрова {item_id or 'unknown'} для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Сўровни ўчиришда хатолик юз берди!", reply_markup=get_requests_menu())
+        logger.error(f"Ошибка базы данных при удалении запроса {item_id or 'неизвестно'}: {e}", exc_info=True)
+        await notify_admin(f"Ошибка базы данных при удалении запроса для user_id={user_id}: {str(e)}", bot=message.bot)
+        await message.answer(
+            "Сўровни ўчиришда хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=get_requests_menu()
+        )
         await state.set_state(RequestsMenu.menu)
     except Exception as e:
-        logger.error(f"Неожиданная ошибка в process_delete_request для user_id={user_id}: {e}", exc_info=True)
-        await notify_admin(f"Неожиданная ошибка в process_delete_request для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Хатолик юз берди! Админ билан боғланинг (@MSMA_UZ).", reply_markup=get_requests_menu())
+        logger.error(f"Непредвиденная ошибка в process_delete_request для user_id={user_id}: {e}", exc_info=True)
+        await notify_admin(f"Непредвиденная ошибка в process_delete_request для user_id={user_id}: {str(e)}", bot=message.bot)
+        await message.answer(
+            "Хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=get_requests_menu()
+        )
         await state.set_state(RequestsMenu.menu)
 
 @buyer_only
 async def close_request_start(message: types.Message, state: FSMContext, role: str):
     user_id = message.from_user.id
-    current_state = await state.get_state()
-    logger.debug(f"close_request_start: user_id={user_id}, text='{message.text}', state={current_state}")
-    if current_state != RequestsMenu.menu.state:
-        logger.warning(f"Unexpected state for close_request_start: user_id={user_id}, state={current_state}")
-        await state.clear()
-        await message.answer("Менинг сўровларим:", reply_markup=get_requests_menu())
-        await state.set_state(RequestsMenu.menu)
-        return
+    logger.debug(f"close_request_start: user_id={user_id}, text='{message.text}'")
     try:
-        async with aiosqlite.connect(DB_NAME) as conn:
+        async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
+            async with conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='requests'"
+            ) as cursor:
+                if not await cursor.fetchone():
+                    raise aiosqlite.Error("Table 'requests' does not exist")
             async with conn.execute(
                 "SELECT id, unique_id, category, sort, volume_ton, price FROM requests WHERE user_id = ? AND status = 'active'",
                 (user_id,)
@@ -603,135 +693,184 @@ async def close_request_start(message: types.Message, state: FSMContext, role: s
         request_buttons = [req[1] for req in requests]
         keyboard = make_keyboard(request_buttons, columns=2, with_back=True)
         request_list = [
-            f"{req[1]} - {req[2]} ({req[3]}), {req[4]} тонна, {req[5]} сум"
+            f"{req[1]} - {req[2]} ({req[3]}), {req[4]} тонна, {req[5]:,.0f} сўм"
             for req in requests
         ]
         response = "Ёпиш учун сўров танланг:\n" + "\n".join(request_list)
         await message.answer(response, reply_markup=keyboard)
         await state.set_state(CloseRequest.select_request)
         await state.update_data(requests=requests)
-        logger.info(f"Пользователь {user_id} начал процесс закрытия запроса")
+        logger.info(f"Пользователь {user_id} начал закрытие запроса")
     except aiosqlite.Error as e:
-        logger.error(f"Ошибка загрузки сўровларим для закрытия для user_id={user_id}: {e}", exc_info=True)
-        await notify_admin(f"Ошибка загрузки сўровларим для закрытия для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Сўровларни юклашда хатолик юз берди!", reply_markup=get_requests_menu())
+        logger.error(f"Ошибка базы данных в close_request_start для user_id={user_id}: {e}", exc_info=True)
+        await notify_admin(f"Ошибка базы данных в close_request_start для user_id={user_id}: {str(e)}", bot=message.bot)
+        await message.answer(
+            "Сўровларни юклашда хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=get_requests_menu()
+        )
         await state.set_state(RequestsMenu.menu)
     except Exception as e:
-        logger.error(f"Неожиданная ошибка в close_request_start для user_id={user_id}: {e}", exc_info=True)
-        await notify_admin(f"Неожиданная ошибка в close_request_start для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Хатолик юз берди! Админ билан боғланинг (@MSMA_UZ).", reply_markup=get_requests_menu())
+        logger.error(f"Непредвиденная ошибка в close_request_start для user_id={user_id}: {e}", exc_info=True)
+        await notify_admin(f"Непредвиденная ошибка в close_request_start для user_id={user_id}: {str(e)}", bot=message.bot)
+        await message.answer(
+            "Хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=get_requests_menu()
+        )
         await state.set_state(RequestsMenu.menu)
 
 @buyer_only
 async def process_close_request(message: types.Message, state: FSMContext, role: str):
     user_id = message.from_user.id
-    normalized_text = normalize_text(message.text)
-    current_state = await state.get_state()
-    logger.debug(f"process_close_request: user_id={user_id}, text='{normalized_text}', state={current_state}")
-    if current_state != CloseRequest.select_request.state:
-        logger.warning(f"Unexpected state for process_close_request: user_id={user_id}, state={current_state}")
-        await state.set_state(RequestsMenu.menu)
-        await message.answer("Менинг сўровларим:", reply_markup=get_requests_menu())
-        return
+    unique_id = message.text
+    logger.debug(f"process_close_request: user_id={user_id}, text='{unique_id}'")
     try:
-        if normalized_text == "орқага":
+        if unique_id == "Орқага":
             await message.answer("Менинг сўровларим:", reply_markup=get_requests_menu())
             await state.set_state(RequestsMenu.menu)
-            logger.info(f"Пользователь {user_id} вернулся в меню сўровларим из выбора для закрытия")
+            logger.info(f"Пользователь {user_id} вернулся в меню сўровларим")
             return
-        selected_unique_id = message.text.strip()
         data = await state.get_data()
         requests = data.get("requests", [])
-        selected_request = next((req for req in requests if req[1] == selected_unique_id), None)
+        selected_request = next((req for req in requests if req[1] == unique_id), None)
         if selected_request:
-            await state.update_data(selected_request_id=selected_request[0], selected_unique_id=selected_unique_id)
-            await message.answer("Якуний нарҳни киритинг (сум):", reply_markup=make_keyboard(["Орқага"], columns=1, one_time=True))
+            await state.update_data(selected_request_id=selected_request[0], selected_unique_id=unique_id)
+            await message.answer(
+                "Якуний нарҳни киритинг (сўмда):",
+                reply_markup=make_keyboard([], with_back=True)
+            )
             await state.set_state(CloseRequest.awaiting_final_price)
-            logger.debug(f"Пользователь {user_id} выбрал сўров {selected_unique_id} для закрытия")
+            logger.info(f"Пользователь {user_id} выбрал запрос {unique_id} для закрытия")
         else:
-            await message.answer("Ното‘г‘ри танлов. Илтимос, рўйхатдан сўров танланг:", reply_markup=get_requests_menu())
-            await state.set_state(RequestsMenu.menu)
-            logger.warning(f"Пользователь {user_id} выбрал неверный запрос: {selected_unique_id}")
+            await message.answer(
+                "Ното‘г‘ри танлов. Илтимос, рўйхатдан сўров танланг:",
+                reply_markup=make_keyboard([req[1] for req in requests], columns=2, with_back=True)
+            )
+            logger.warning(f"Некорректный выбор запроса: {unique_id}")
     except Exception as e:
         logger.error(f"Ошибка в process_close_request для user_id={user_id}: {e}", exc_info=True)
         await notify_admin(f"Ошибка в process_close_request для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Хатолик юз берди! Админ билан боғланинг (@MSMA_UZ).", reply_markup=get_requests_menu())
+        await message.answer(
+            "Хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=get_requests_menu()
+        )
         await state.set_state(RequestsMenu.menu)
 
 @buyer_only
 async def process_final_price(message: types.Message, state: FSMContext, role: str):
     user_id = message.from_user.id
-    normalized_text = normalize_text(message.text)
-    current_state = await state.get_state()
-    logger.debug(f"process_final_price: user_id={user_id}, text='{normalized_text}', state={current_state}")
-    if current_state != CloseRequest.awaiting_final_price.state:
-        logger.warning(f"Unexpected state for process_final_price: user_id={user_id}, state={current_state}")
-        await state.set_state(RequestsMenu.menu)
-        await message.answer("Менинг сўровларим:", reply_markup=get_requests_menu())
-        return
+    final_price_str = message.text
+    logger.debug(f"process_final_price: user_id={user_id}, text='{final_price_str}'")
     try:
-        if normalized_text == "орқага":
-            await close_request_start(message, state)
-            logger.info(f"Пользователь {user_id} вернулся к выбору запроса для закрытия")
+        if final_price_str == "Орқага":
+            async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
+                async with conn.execute(
+                    "SELECT id, unique_id, category, sort, volume_ton, price FROM requests WHERE user_id = ? AND status = 'active'",
+                    (user_id,)
+                ) as cursor:
+                    requests = await cursor.fetchall()
+            if not requests:
+                await message.answer("Ёпиш учун сўровлар йўқ.", reply_markup=get_requests_menu())
+                await state.set_state(RequestsMenu.menu)
+                logger.info(f"Пользователь {user_id} не имеет запросов для закрытия")
+                return
+            request_buttons = [req[1] for req in requests]
+            keyboard = make_keyboard(request_buttons, columns=2, with_back=True)
+            request_list = [
+                f"{req[1]} - {req[2]} ({req[3]}), {req[4]} тонна, {req[5]:,.0f} сўм"
+                for req in requests
+            ]
+            response = "Ёпиш учун сўров танланг:\n" + "\n".join(request_list)
+            await message.answer(response, reply_markup=keyboard)
+            await state.set_state(CloseRequest.select_request)
+            await state.update_data(requests=requests)
+            logger.info(f"Пользователь {user_id} вернулся к выбору запроса")
             return
-        valid, final_price = validate_number(message.text, min_value=0)
-        if not valid or final_price > 1_000_000_000:
-            await message.answer("Нарх мусбат рақам бўлиши ва 1 миллиард сумдан ошмаслиги керак:", reply_markup=make_keyboard(["Орқага"], columns=1, one_time=True))
-            logger.warning(f"Неверная цена от {user_id}: {message.text}")
+        valid, final_price = await validate_number_minimal(final_price_str)
+        if not valid or final_price <= 0 or final_price > 1_000_000_000:
+            await message.answer(
+                "Нарх мусбат рақам бўлиши ва 1 миллиард сумдан ошмаслиги керак:",
+                reply_markup=make_keyboard([], with_back=True)
+            )
+            logger.warning(f"Некорректная финальная цена от user_id={user_id}: {final_price_str}")
             return
         data = await state.get_data()
         request_id = data.get("selected_request_id")
         unique_id = data.get("selected_unique_id")
         if not request_id or not unique_id:
-            await message.answer("Ошибка: запрос не выбран. Начните заново.", reply_markup=get_requests_menu())
+            await message.answer(
+                "Ошибка: запрос не выбран. Начните заново.",
+                reply_markup=get_requests_menu()
+            )
             await state.set_state(RequestsMenu.menu)
-            logger.warning(f"Ошибка в process_final_price для user_id={user_id}: request_id или unique_id отсутствует")
+            logger.warning(f"Отсутствует request_id или unique_id для user_id={user_id}")
             return
-        archived_at = format_uz_datetime(datetime.now())
-        async with aiosqlite.connect(DB_NAME) as conn:
+        archived_at = format_uz_datetime(datetime.now(pytz.UTC))
+        async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
             async with conn.execute(
                 "SELECT channel_message_id FROM requests WHERE id = ? AND user_id = ? AND status = 'active'",
                 (request_id, user_id)
             ) as cursor:
                 request = await cursor.fetchone()
             if not request:
-                await message.answer(f"Сўров {unique_id} топилмади!", reply_markup=get_requests_menu())
+                await message.answer(
+                    f"Сўров {unique_id} топилмади!",
+                    reply_markup=get_requests_menu()
+                )
                 await state.set_state(RequestsMenu.menu)
-                logger.warning(f"Сўров {unique_id} не найден для user_id={user_id}")
+                logger.warning(f"Запрос {unique_id} не найден для user_id={user_id}")
                 return
+            if request[0]:
+                try:
+                    await message.bot.delete_message(chat_id=CHANNEL_ID, message_id=request[0])
+                    logger.debug(f"Сообщение {request[0]} удалено из канала")
+                except TelegramBadRequest as e:
+                    if "message can't be deleted" in str(e) or "message to delete not found" in str(e):
+                        logger.warning(f"Сообщение {request[0]} для запроса {unique_id} уже удалено или не найдено: {e}")
+                        await conn.execute(
+                            "UPDATE requests SET channel_message_id = NULL WHERE unique_id = ? AND user_id = ?",
+                            (unique_id, user_id)
+                        )
+                        await conn.commit()
+                        logger.info(f"Сброшено channel_message_id для запроса {unique_id}")
+                    else:
+                        logger.error(f"Не удалось удалить сообщение {request[0]} для запроса {unique_id}: {e}", exc_info=True)
+                        await notify_admin(f"Не удалось удалить сообщение {request[0]} для запроса {unique_id}: {str(e)}", bot=message.bot)
+                except Exception as e:
+                    logger.warning(f"Не удалось удалить сообщение {request[0]}: {e}", exc_info=True)
+                    await notify_admin(f"Не удалось удалить сообщение {request[0]} для запроса {unique_id}: {str(e)}", bot=message.bot)
             await conn.execute(
                 "UPDATE requests SET status = 'archived', final_price = ?, archived_at = ? WHERE id = ? AND user_id = ?",
                 (final_price, archived_at, request_id, user_id)
             )
             await conn.commit()
-            if request[0]:
-                try:
-                    await message.bot.delete_message(chat_id=CHANNEL_ID, message_id=request[0])
-                    logger.debug(f"Сообщение {request[0]} удалено из канала")
-                except Exception as e:
-                    logger.warning(f"Не удалось удалить сообщение {request[0]} из канала: {e}")
         await message.answer(
-            f"✅ Сўров {unique_id} архивига ўтказилди. Якуний нарҳ: {final_price} сум.",
+            f"✅ Сўров {unique_id} архивига ўтказилди. Якуний нарх: {final_price:,.0f} сўм.",
             reply_markup=get_requests_menu()
         )
         await state.set_state(RequestsMenu.menu)
-        logger.info(f"Пользователь {user_id} закрыл сўров {unique_id} с окончательной ценой {final_price} сум")
+        logger.info(f"Пользователь {user_id} закрыл запрос {unique_id} с ценой {final_price} сўм")
     except aiosqlite.Error as e:
-        logger.error(f"Ошибка базы данных при закрытии сўрова {unique_id or 'unknown'} для user_id={user_id}: {e}", exc_info=True)
-        await notify_admin(f"Ошибка базы данных при закрытии сўрова {unique_id or 'unknown'} для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Сўровни ёпишда хатолик юз берди!", reply_markup=get_requests_menu())
+        logger.error(f"Ошибка базы данных при закрытии запроса {unique_id or 'неизвестно'}: {e}", exc_info=True)
+        await notify_admin(f"Ошибка базы данных при закрытии запроса для user_id={user_id}: {str(e)}", bot=message.bot)
+        await message.answer(
+            "Сўровни ёпишда хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=get_requests_menu()
+        )
         await state.set_state(RequestsMenu.menu)
     except Exception as e:
-        logger.error(f"Неожиданная ошибка в process_final_price для user_id={user_id}: {e}", exc_info=True)
-        await notify_admin(f"Неожиданная ошибка в process_final_price для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Хатолик юз берди! Админ билан боғланинг (@MSMA_UZ).", reply_markup=get_requests_menu())
+        logger.error(f"Непредвиденная ошибка в process_final_price для user_id={user_id}: {e}", exc_info=True)
+        await notify_admin(f"Непредвиденная ошибка в process_final_price для user_id={user_id}: {str(e)}", bot=message.bot)
+        await message.answer(
+            "Хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=get_requests_menu()
+        )
         await state.set_state(RequestsMenu.menu)
 
 async def notify_next_pending_item(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     logger.debug(f"notify_next_pending_item: user_id={user_id}")
     try:
-        async with aiosqlite.connect(DB_NAME) as conn:
+        async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
             async with conn.execute(
                 "SELECT unique_id, type FROM pending_items WHERE user_id = ? ORDER BY created_at LIMIT 1",
                 (user_id,)
@@ -741,11 +880,12 @@ async def notify_next_pending_item(message: types.Message, state: FSMContext):
                 logger.debug(f"Нет незавершённых элементов для user_id={user_id}")
                 return
             unique_id, item_type = item
-            if item_type == "product":
-                table, menu_func = "products", get_ads_menu
-            else:
-                table, menu_func = "requests", get_requests_menu
-            async with conn.execute(f"SELECT category, region FROM {table} WHERE unique_id = ?", (unique_id,)) as cursor:
+            table = "products" if item_type == "product" else "requests"
+            menu_func = get_ads_menu if item_type == "product" else get_requests_menu
+            async with conn.execute(
+                f"SELECT category, region FROM {table} WHERE unique_id = ?",
+                (unique_id,)
+            ) as cursor:
                 details = await cursor.fetchone()
             if details:
                 category, region = details
@@ -756,36 +896,39 @@ async def notify_next_pending_item(message: types.Message, state: FSMContext):
                     f"Тасдиқлашни кутмоқда...",
                     reply_markup=menu_func()
                 )
-            await conn.execute("DELETE FROM pending_items WHERE unique_id = ? AND user_id = ?", (unique_id, user_id))
+            await conn.execute(
+                "DELETE FROM pending_items WHERE unique_id = ? AND user_id = ?",
+                (unique_id, user_id)
+            )
             await conn.commit()
         logger.info(f"Уведомление о незавершённом {item_type} {unique_id} отправлено пользователю {user_id}")
     except aiosqlite.Error as e:
-        logger.error(f"Ошибка уведомления о незавершённом элементе для user_id={user_id}: {e}", exc_info=True)
-        await notify_admin(f"Ошибка уведомления о незавершённом элементе для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Хатолик юз берди! Админ билан боғланинг (@MSMA_UZ).", reply_markup=get_main_menu(BUYER_ROLE))
+        logger.error(f"Ошибка базы данных в notify_next_pending_item для user_id={user_id}: {e}", exc_info=True)
+        await notify_admin(f"Ошибка базы данных в notify_next_pending_item для user_id={user_id}: {str(e)}", bot=message.bot)
+        await message.answer(
+            "Хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=get_main_menu(BUYER_ROLE)
+        )
         await state.set_state(RequestsMenu.menu)
     except Exception as e:
-        logger.error(f"Неожиданная ошибка в notify_next_pending_item для user_id={user_id}: {e}", exc_info=True)
-        await notify_admin(f"Неожиданная ошибка в notify_next_pending_item для user_id={user_id}: {str(e)}", bot=message.bot)
-        await message.answer("Хатолик юз берди! Админ билан боғланинг (@MSMA_UZ).", reply_markup=get_main_menu(BUYER_ROLE))
+        logger.error(f"Непредвиденная ошибка в notify_next_pending_item для user_id={user_id}: {e}", exc_info=True)
+        await notify_admin(f"Непредвиденная ошибка в notify_next_pending_item для user_id={user_id}: {str(e)}", bot=message.bot)
+        await message.answer(
+            "Хатолик юз берди! Админ билан боғланинг (@ad_mbozor).",
+            reply_markup=get_main_menu(BUYER_ROLE)
+        )
         await state.set_state(RequestsMenu.menu)
 
 def register_handlers(dp: Dispatcher):
-    logger.debug("Registering request handlers")
+    logger.info("Регистрация обработчиков запросов")
     dp.message.register(handle_requests_back_button, RequestsMenu.menu, F.text == "Орқага")
     dp.message.register(process_requests_menu, RequestsMenu.menu)
-    dp.message.register(send_request_start, F.text == "Сўров юбормоқ")
+    dp.message.register(send_request_start, F.text == "Сўров юбориш")
     dp.message.register(requests_menu, F.text == "Менинг сўровларим")
-    dp.message.register(add_request_start, F.text == "Сўров қўшиш")
-    dp.message.register(process_category, AddRequest.category)
     dp.message.register(process_category, SendRequest.category)
-    dp.message.register(process_sort, AddRequest.sort)
     dp.message.register(process_sort, SendRequest.sort)
-    dp.message.register(process_region, AddRequest.region)
     dp.message.register(process_region, SendRequest.region)
-    dp.message.register(process_volume_ton, AddRequest.volume_ton)
     dp.message.register(process_volume_ton, SendRequest.volume_ton)
-    dp.message.register(process_price, AddRequest.price)
     dp.message.register(process_price, SendRequest.price)
     dp.message.register(requests_list, F.text == "Сўровлар рўйхати")
     dp.message.register(requests_delete_start, F.text == "Сўровни ўчириш")
@@ -793,4 +936,4 @@ def register_handlers(dp: Dispatcher):
     dp.message.register(close_request_start, F.text == "Сўровни ёпиш")
     dp.message.register(process_close_request, CloseRequest.select_request)
     dp.message.register(process_final_price, CloseRequest.awaiting_final_price)
-    logger.debug("Request handlers registered successfully")
+    logger.info("Обработчики запросов зарегистрированы")

@@ -1,18 +1,20 @@
 import asyncio
 import logging
-
-import aiosqlite
-import pytz
 import re
 import unicodedata
+import json
 from datetime import datetime
 from typing import Optional, List, Union
 
+import aiosqlite
+import pytz
 from aiogram import Bot, types
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
 from aiogram.utils.markdown import hcode
-from config import ADMIN_IDS, CHANNEL_ID, DB_NAME, DB_TIMEOUT, ROLES
+from aiogram.fsm.storage.base import BaseStorage
+
+from config import ADMIN_IDS, CHANNEL_ID, DB_NAME, DB_TIMEOUT, ROLES, MAX_SORT_LENGTH, WEBAPP_URL
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +26,11 @@ MONTHS_UZ = {
 }
 
 def normalize_text(text: str) -> str:
-    """Нормализует текст, убирая неразрывные пробелы, пробелы и приводя к нижнему регистру."""
+    """Нормализует текст для ручного ввода (например, сорт), убирая эмодзи и пробелы."""
     if not isinstance(text, str):
         logger.warning(f"Invalid text type for normalize_text: {type(text)}")
         return ""
+    text = re.sub(r'[\U0001F000-\U0001FFFF]', '', text)
     return unicodedata.normalize("NFKC", text.strip()).lower()
 
 async def notify_admin(text: str, bot: Optional[Bot] = None) -> bool:
@@ -44,7 +47,7 @@ async def notify_admin(text: str, bot: Optional[Bot] = None) -> bool:
                     text=hcode(text),
                     parse_mode="HTML"
                 )
-                logger.info(f"Admin notification sent to {admin_id}: {text}")
+                logger.info(f"Admin notification sent to {admin_id}")
             except TelegramBadRequest as e:
                 logger.error(f"Failed to send notification to admin {admin_id}: {e}", exc_info=True)
                 continue
@@ -53,30 +56,24 @@ async def notify_admin(text: str, bot: Optional[Bot] = None) -> bool:
         logger.error(f"Error sending admin notification: {e}", exc_info=True)
         return False
 
-def make_keyboard(buttons: List[Union[str, KeyboardButton]], columns: int = 1, one_time: bool = False, with_back: bool = False) -> ReplyKeyboardMarkup:
-    """Создаёт клавиатуру из списка кнопок."""
+def make_keyboard(options: list[str], columns: int = 2, with_back: bool = False, one_time: bool = False) -> ReplyKeyboardMarkup:
+    """Создаёт клавиатуру из списка строк с указанным количеством столбцов."""
     keyboard = []
-    button_list = []
-    for button in buttons:
-        if isinstance(button, KeyboardButton):
-            button_list.append(button)
-        elif isinstance(button, str):
-            button_list.append(KeyboardButton(text=button))
-        else:
-            logger.warning(f"Invalid button type: {type(button)}, value: {button}")
-            continue
-    if with_back:
-        button_list.append(KeyboardButton(text="Орқага"))
-    if not button_list:
-        logger.warning("No buttons provided for keyboard")
-        return ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True, one_time_keyboard=one_time)
-    for i in range(0, len(button_list), columns):
-        row = button_list[i:i + columns]
+    for i in range(0, len(options), columns):
+        row = []
+        for option in options[i:i + columns]:
+            if option == "Эълонлар доскаси":
+                row.append(KeyboardButton(text=option, web_app=WebAppInfo(url=WEBAPP_URL)))
+            else:
+                row.append(KeyboardButton(text=option))
         keyboard.append(row)
+    if with_back:
+        keyboard.append([KeyboardButton(text="Орқага")])
     return ReplyKeyboardMarkup(
         keyboard=keyboard,
         resize_keyboard=True,
-        one_time_keyboard=one_time
+        one_time_keyboard=one_time,
+        input_field_placeholder="Тугмани танланг:"
     )
 
 async def check_role(event: types.Message | types.CallbackQuery, allow_unregistered: bool = False) -> tuple[bool, Optional[str]]:
@@ -88,15 +85,14 @@ async def check_role(event: types.Message | types.CallbackQuery, allow_unregiste
                 result = await asyncio.wait_for(cursor.fetchone(), timeout=DB_TIMEOUT)
                 if result:
                     role = result[0]
+                    logger.debug(f"check_role: user_id={user_id}, role={role}")
                     if role in ROLES:
-                        logger.debug(f"Role check passed for user_id={user_id}, role={role}")
                         return True, role
-                    logger.warning(f"Invalid role for user_id={user_id}: {role}")
+                    logger.warning(f"check_role: user_id={user_id} имеет некорректную роль: {role}")
                     return False, None
+                logger.debug(f"check_role: user_id={user_id} не найден в базе")
                 if allow_unregistered:
-                    logger.debug(f"User_id={user_id} is unregistered, allow_unregistered=True")
                     return False, None
-                logger.warning(f"User_id={user_id} is unregistered")
                 return False, None
     except asyncio.TimeoutError:
         logger.error(f"Timeout in check_role for user_id={user_id}")
@@ -105,37 +101,55 @@ async def check_role(event: types.Message | types.CallbackQuery, allow_unregiste
         logger.error(f"Database error in check_role for user_id={user_id}: {e}", exc_info=True)
         return False, None
 
-async def check_subscription(bot: Bot, user_id: int) -> tuple[bool, bool, bool]:
-    """Проверяет статус подписки пользователя."""
+async def check_subscription(bot: Bot, user_id: int, storage: BaseStorage) -> tuple[bool, bool, bool]:
+    """Проверяет подписку пользователя, освобождая админов."""
+    if user_id in ADMIN_IDS:
+        return True, True, True
+    cache_key = f"sub:{user_id}"
+    if hasattr(storage, 'redis'):
+        try:
+            cached = await storage.redis.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception as e:
+            logger.warning(f"Redis error in check_subscription for user_id={user_id}: {e}")
+
     try:
         async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
             async with conn.execute(
-                "SELECT channel_expires, bot_expires FROM payments WHERE user_id = ?",
+                "SELECT bot_expires FROM payments WHERE user_id = ?",
                 (user_id,)
             ) as cursor:
-                result = await asyncio.wait_for(cursor.fetchone(), timeout=DB_TIMEOUT)
-                if not result:
-                    logger.debug(f"No subscription found for user_id={user_id}")
-                    return False, False, False
-                channel_expires, bot_expires = result
-                now = datetime.now(pytz.UTC)
-                channel_active = False
+                result = await cursor.fetchone()
+        bot_expires = result[0] if result else None
+
+        if bot_expires:
+            expires_dt = parse_uz_datetime(bot_expires)
+            if expires_dt is None:
                 bot_active = False
-                if channel_expires:
-                    channel_expires_dt = parse_uz_datetime(channel_expires)
-                    if channel_expires_dt:
-                        channel_active = channel_expires_dt > now
-                    else:
-                        logger.warning(f"Invalid channel_expires format for user_id={user_id}: {channel_expires}")
-                if bot_expires:
-                    bot_expires_dt = parse_uz_datetime(bot_expires)
-                    if bot_expires_dt:
-                        bot_active = bot_expires_dt > now
-                    else:
-                        logger.warning(f"Invalid bot_expires format for user_id={user_id}: {bot_expires}")
-                is_subscribed = channel_active or bot_active
-                logger.debug(f"Subscription check for user_id={user_id}: channel_active={channel_active}, bot_active={bot_active}, is_subscribed={is_subscribed}")
-                return channel_active, bot_active, is_subscribed
+                is_subscribed = False
+            else:
+                now = datetime.now(pytz.timezone('Asia/Tashkent'))
+                if expires_dt > now:
+                    bot_active = True
+                    is_subscribed = True
+                else:
+                    bot_active = False
+                    is_subscribed = False
+        else:
+            bot_active = False
+            is_subscribed = False
+
+        response = (False, bot_active, is_subscribed)
+        if hasattr(storage, 'redis'):
+            try:
+                if not is_subscribed:
+                    await storage.redis.delete(cache_key)
+                else:
+                    await storage.redis.setex(cache_key, 60, json.dumps(response))
+            except Exception as e:
+                logger.warning(f"Redis error caching subscription for user_id={user_id}: {e}")
+        return response
     except asyncio.TimeoutError:
         logger.error(f"Timeout in check_subscription for user_id={user_id}")
         return False, False, False
@@ -143,28 +157,46 @@ async def check_subscription(bot: Bot, user_id: int) -> tuple[bool, bool, bool]:
         logger.error(f"Database error in check_subscription for user_id={user_id}: {e}", exc_info=True)
         return False, False, False
 
+async def invalidate_cache(storage, table: str) -> None:
+    """Инвалидирует кэш для указанной таблицы."""
+    if hasattr(storage, 'redis'):
+        try:
+            await storage.redis.publish(f'cache_invalidate:{table}', 'invalidate')
+            logger.debug(f"Cache invalidated for table: {table}")
+        except Exception as e:
+            logger.warning(f"Redis error in invalidate_cache for table {table}: {e}")
+
 def validate_number(value: str, min_value: float = 0) -> tuple[bool, Optional[float]]:
     """Проверяет, является ли строка числом, и возвращает его."""
     try:
         number = float(value.replace(',', '.').strip())
         if number < min_value:
-            logger.warning(f"Number {number} is less than min_value {min_value}")
             return False, None
         return True, number
     except ValueError:
-        logger.warning(f"Invalid number format: {value}")
         return False, None
+
+async def validate_number_minimal(value: str) -> tuple[bool, float]:
+    """Минимальная проверка числа для объёма и цены."""
+    try:
+        number = float(value)
+        return True, number
+    except ValueError:
+        return False, 0
+
+async def validate_sort(sort: str) -> bool:
+    """Проверяет длину строки сорта."""
+    return len(sort) <= MAX_SORT_LENGTH
 
 async def has_pending_items(user_id: int) -> bool:
     """Проверяет наличие незавершённых элементов у пользователя."""
     try:
         async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
             async with conn.execute(
-                "SELECT COUNT(*) FROM pending_items WHERE user_id = ?", (user_id,)
+                    "SELECT COUNT(*) FROM pending_items WHERE user_id = ?", (user_id,)
             ) as cursor:
                 result = await asyncio.wait_for(cursor.fetchone(), timeout=DB_TIMEOUT)
                 count = result[0]
-                logger.debug(f"Pending items check for user_id={user_id}: count={count}")
                 return count > 0
     except asyncio.TimeoutError:
         logger.error(f"Timeout in has_pending_items for user_id={user_id}")
@@ -174,30 +206,35 @@ async def has_pending_items(user_id: int) -> bool:
         return False
 
 def format_uz_datetime(dt: datetime) -> str:
-    """Форматирует дату в узбекском формате."""
+    """Форматирует дату в формате DD.MM.YYYY HH:MM:SS в часовом поясе Asia/Tashkent."""
     if not isinstance(dt, datetime):
-        logger.warning(f"Invalid datetime object: {dt}")
         return "Кўрсатилмаган"
-    eng_date = dt.strftime("%d %B %Y йил %H:%M:%S")
-    for eng, uz in MONTHS_UZ.items():
-        eng_date = eng_date.replace(eng, uz)
-    return eng_date
+    tz = pytz.timezone('Asia/Tashkent')
+    if dt.tzinfo is None:
+        dt = pytz.UTC.localize(dt)
+    dt_local = dt.astimezone(tz)
+    return dt_local.strftime("%d.%m.%Y %H:%M:%S")
 
 def parse_uz_datetime(date_str: str) -> Optional[datetime]:
-    """Парсит дату в узбекском формате."""
+    """Парсит дату в узбекском формате или других форматах, возвращая время в Asia/Tashkent."""
     if not date_str or not isinstance(date_str, str):
-        logger.warning(f"Invalid date string: {date_str}")
         return None
     try:
-        return datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=pytz.UTC)
+        dt = datetime.strptime(date_str, '%d.%m.%Y %H:%M:%S')
+        return pytz.timezone('Asia/Tashkent').localize(dt)
+    except ValueError:
+        pass
+    try:
+        dt = datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S')
+        return pytz.timezone('Asia/Tashkent').localize(dt)
     except ValueError:
         pass
     try:
         for eng, uz in MONTHS_UZ.items():
             date_str = date_str.replace(uz, eng)
-        return datetime.strptime(date_str, '%d %B %Y йил %H:%M:%S').replace(tzinfo=pytz.UTC)
+        dt = datetime.strptime(date_str, '%d %B %Y йил %H:%M:%S')
+        return pytz.timezone('Asia/Tashkent').localize(dt)
     except ValueError:
-        logger.warning(f"Failed to parse date: {date_str}")
         return None
 
 def get_main_menu(role: Optional[str]) -> ReplyKeyboardMarkup:
@@ -213,10 +250,12 @@ def get_main_menu(role: Optional[str]) -> ReplyKeyboardMarkup:
         buttons = [
             "Менинг профилим",
             "Менинг сўровларим",
-            "Сўров қўшиш",
+            "Сўров юбориш",
             "Эълонлар доскаси"
         ]
-    else:  # admin or None
+    elif role == ROLES[2]:  # admin
+        return get_admin_menu()
+    else:  # unregistered
         buttons = ["Рўйхатдан ўтиш"]
     return make_keyboard(buttons, columns=2, one_time=False)
 
@@ -228,16 +267,17 @@ def get_admin_menu() -> ReplyKeyboardMarkup:
         "Сўровларни бошқариш",
         "Обунани бошқариш",
         "Архивни бошқариш",
-        "Статистика"
+        "Статистика",
+        "Эълонлар доскаси"
     ]
     return make_keyboard(buttons, columns=2, one_time=False)
 
-def get_ads_menu() -> ReplyKeyboardMarkup:
+def get_ads_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
     """Создаёт меню для работы с объявлениями в двух столбцах."""
     buttons = [
-        "Эълонлар рўйхати",
-        "Эълонни ўчириш",
-        "Эълонни ёпиш",
+        "Барча эълонлар рўйхати" if is_admin else "Эълонлар рўйхати",
+        "Эълонларни ўчириш" if is_admin else "Эълонни ўчириш",
+        "Эълонларни архивга ўтказиш" if is_admin else "Эълонни ёпиш",
         "Орқага"
     ]
     return make_keyboard(buttons, columns=2, one_time=False)
@@ -252,12 +292,26 @@ def get_profile_menu() -> ReplyKeyboardMarkup:
     ]
     return make_keyboard(buttons, columns=2, one_time=False)
 
-def get_requests_menu() -> ReplyKeyboardMarkup:
+def get_requests_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
     """Создаёт меню для работы с запросами в двух столбцах."""
     buttons = [
-        "Сўровлар рўйхати",
-        "Сўровни ўчириш",
-        "Сўровни ёпиш",
+        "Барча сўровлар рўйхати" if is_admin else "Сўровлар рўйхати",
+        "Сўровларни ўчириш" if is_admin else "Сўровни ўчириш",
+        "Сўровларни архивга ўтказиш" if is_admin else "Сўровни ёпиш",
         "Орқага"
     ]
     return make_keyboard(buttons, columns=2, one_time=False)
+
+def validate_phone(phone: str) -> bool:
+    """Проверяет, соответствует ли номер телефона форматам Узбекистана (+998), Кыргызстана/Таджикистана (+99X), или России/Казахстана (+7)."""
+    logger.debug(f"Validating phone number: {phone}")
+    return bool(re.match(r'^\+((998|99[0-9])[0-9]{9}|7[0-9]{10})$', phone))
+
+async def save_registration_state(storage, user_id: int, data: dict):
+    """Сохраняет промежуточное состояние регистрации в Redis."""
+    if hasattr(storage, 'redis'):
+        try:
+            await storage.redis.setex(f"reg:{user_id}", 3600, json.dumps(data))
+            logger.debug(f"Registration state saved for user_id={user_id}")
+        except Exception as e:
+            logger.warning(f"Redis error saving registration state for user_id={user_id}: {e}")

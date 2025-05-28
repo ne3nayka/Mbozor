@@ -170,6 +170,9 @@ CATEGORIES = [cat.strip() for cat in CATEGORIES_STR.split(",") if cat.strip()]
 if not CATEGORIES:
     logger.critical("CATEGORIES пустой!")
     raise ValueError("Требуется хотя бы одна категория")
+if len(CATEGORIES) != len(set(CATEGORIES)):
+    logger.critical("Обнаружены дубликаты в CATEGORIES!")
+    raise ValueError("Категории должны быть уникальными")
 logger.info(f"Загружены CATEGORIES: {CATEGORIES}")
 
 try:
@@ -231,10 +234,9 @@ SUBSCRIPTION_PRICES = {
     "bot": int(os.getenv("SUBSCRIPTION_BOT_PRICE", "100000"))
 }
 try:
-    if SUBSCRIPTION_PRICES["period_days"] <= 0:
-        raise ValueError("SUBSCRIPTION_PERIOD_DAYS должен быть положительным")
-    if SUBSCRIPTION_PRICES["bot"] <= 0:
-        raise ValueError("SUBSCRIPTION_BOT_PRICE должен быть положительным")
+    for key, value in SUBSCRIPTION_PRICES.items():
+        if value <= 0:
+            raise ValueError(f"{key} должен быть положительным")
     logger.info(f"Загружены SUBSCRIPTION_PRICES: {SUBSCRIPTION_PRICES}")
 except ValueError as e:
     logger.critical(f"Неверные SUBSCRIPTION_PRICES: {e}")

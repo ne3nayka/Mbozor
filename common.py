@@ -3,98 +3,66 @@ import aiosqlite
 from aiogram import types, Dispatcher, F, Bot
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from utils import check_role, make_keyboard, check_subscription, format_uz_datetime, parse_uz_datetime, notify_admin, get_main_menu
-from config import DB_NAME, DB_TIMEOUT, SUBSCRIPTION_PRICES
+from aiogram.fsm.storage.base import BaseStorage
+
+from utils import check_role, make_keyboard, check_subscription, format_uz_datetime, parse_uz_datetime, notify_admin, get_main_menu, get_admin_menu
+from config import DB_NAME, DB_TIMEOUT, SUBSCRIPTION_PRICES, ROLE_MAPPING, ADMIN_IDS, ADMIN_ROLE
 from datetime import datetime
 import pytz
 
 logger = logging.getLogger(__name__)
 
 ACTION_CANCELLED = "Амал бекор қилинди."
-SUBSCRIPTION_ACTIVE = (
-    "Ботга обуна: Фаол\n"
-    "{trial_info}"
-    "Тўлиқ обуна ({period_days} кун):\n"
-    "1. Каналга обуна: {channel_price:,} сўм\n"
-    "2. Бот + Канал: {bot_price:,} сўм/ой\n"
-    "Тўловдан сўнг админга ёзинг (@ad_mbozor) ва user_id ни юборинг: /myid\n"
-    "Тўлов усуллари: Click ёки Payme (админдан сўранг)."
-)
-SUBSCRIPTION_INACTIVE = (
-    "Ботга обуна: Фаол эмас\n"
-    "Тўлиқ обуна ({period_days} кун):\n"
-    "1. Каналга обуна: {channel_price:,} сўм\n"
-    "2. Бот + Канал: {bot_price:,} сўм/ой\n"
-    "Тўловдан сўнг админга ёзинг (@ad_mbozor) ва user_id ни юборинг: /myid\n"
-    "Тўлов усуллари: Click ёки Payme (админдан сўранг)."
-)
-SUBSCRIPTION_EXPIRED = "Сизнинг обунангиз муддати тугади. Обуна бўлиш учун 'Обуна' тугмасини босинг."
 YOUR_ID = "Сизнинг Telegram ID: {telegram_id}"
 NOT_REGISTERED = "Сиз рўйхатдан ўтмагансиз."
 ERROR_MESSAGE = "Хатолик юз берди. Кейинроқ қайта уриниб кўринг ёки админ билан боғланинг (@ad_mbozor)."
 
-async def get_subscription_info(user_id: int, bot: Bot) -> tuple[bool, bool, str | None, bool]:
+async def get_subscription_expiry(user_id: int) -> str:
+    """Получает дату истечения подписки для пользователя."""
     try:
-        channel_active, bot_active, _ = await check_subscription(bot, user_id)
         async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
             async with conn.execute(
-                    "SELECT bot_expires, trial_used FROM payments WHERE user_id = ?",
-                    (user_id,)
+                "SELECT bot_expires FROM payments WHERE user_id = ?",
+                (user_id,)
             ) as cursor:
                 result = await cursor.fetchone()
-        bot_expires = result[0] if result else None
-        trial_used = bool(result[1]) if result else False
-        logger.debug(f"get_subscription_info: user_id={user_id}, bot_expires={bot_expires}, trial_used={trial_used}")
-        return channel_active, bot_active, bot_expires, trial_used
+        if result and result[0]:
+            bot_expires_dt = parse_uz_datetime(result[0])
+            return format_uz_datetime(bot_expires_dt) if bot_expires_dt else "Кўрсатилмаган"
+        return "Кўрсатилмаган"
     except aiosqlite.Error as e:
-        logger.error(f"Маълумотлар базаси хатолиги user_id={user_id}: {e}")
-        await notify_admin(f"get_subscription_info да маълумотлар базаси хатолиги user_id={user_id}: {str(e)}", bot=bot)
-        raise
+        logger.error(f"Ошибка базы данных в get_subscription_expiry для user_id={user_id}: {e}")
+        return "Кўрсатилмаган"
 
-async def send_subscription_message(message: types.Message, user_id: int, role: str):
+async def send_subscription_info(message: types.Message, user_id: int, role: str, storage: BaseStorage):
+    """Отправляет информацию о статусе подписки."""
     try:
-        channel_active, bot_active, bot_expires, trial_used = await get_subscription_info(user_id, message.bot)
-        subscription_prices = {
-            "period_days": SUBSCRIPTION_PRICES["period_days"],
-            "channel_price": SUBSCRIPTION_PRICES.get("channel", 10000),
-            "bot_price": SUBSCRIPTION_PRICES.get("bot_and_channel", 50000)
-        }
-
-        bot_expires_dt = parse_uz_datetime(bot_expires) if bot_expires else None
-        if bot_expires_dt and bot_expires_dt < datetime.now(pytz.UTC):
+        _, bot_active, is_subscribed = await check_subscription(message.bot, user_id, storage)
+        if is_subscribed:
+            expires = await get_subscription_expiry(user_id)
             await message.answer(
-                SUBSCRIPTION_EXPIRED,
-                reply_markup=make_keyboard(["Обуна"], one_time=True)
-            )
-            logger.info(f"Фойдаланувчи {user_id} обуна муддати тугаганлиги ҳақида маълумот сўради")
-        else:
-            bot_expires_formatted = format_uz_datetime(bot_expires_dt) if bot_expires_dt else "Кўрсатилмаган"
-            if bot_active:
-                trial_info = (
-                    f"Сизга 3 кунлик синов муддати берилган. Синов муддати {bot_expires_formatted} да тугайди.\n"
-                    if not trial_used and bot_expires_dt and (bot_expires_dt - datetime.now(pytz.UTC)).days <= 3
-                    else f"Обуна {bot_expires_formatted} гача фаол.\n"
-                )
-                text = SUBSCRIPTION_ACTIVE.format(trial_info=trial_info, **subscription_prices)
-            else:
-                text = SUBSCRIPTION_INACTIVE.format(**subscription_prices)
-
-            await message.answer(
-                text,
+                f"Сизнинг обунангиз {expires} гача амал қилади.",
                 reply_markup=get_main_menu(role) if role else make_keyboard(["Рўйхатдан ўтиш"], one_time=True)
             )
-            logger.info(f"Фойдаланувчи {user_id} обунани текширди: фаол={bot_active}, муддати={bot_expires}")
+        else:
+            await message.answer(
+                f"Бот обунаси ({SUBSCRIPTION_PRICES['period_days']} кун): {SUBSCRIPTION_PRICES['bot']:,} сўм\n"
+                "Тўлов учун @ad_mbozor га ёзинг.",
+                reply_markup=make_keyboard(["Орқага"], one_time=True)
+            )
+        logger.info(f"Пользователь {user_id} запросил информацию о подписке: is_subscribed={is_subscribed}")
     except Exception as e:
-        logger.error(f"Обуна маълумотини юборишда хатолик user_id={user_id}: {e}")
-        await notify_admin(f"send_subscription_message да хатолик user_id={user_id}: {str(e)}", bot=message.bot)
+        logger.error(f"Ошибка в send_subscription_info для user_id={user_id}: {e}", exc_info=True)
+        await notify_admin(f"Ошибка в send_subscription_info для user_id={user_id}: {str(e)}", bot=message.bot)
         await message.answer(
             ERROR_MESSAGE,
             reply_markup=get_main_menu(role) if role else make_keyboard(["Рўйхатдан ўтиш"], one_time=True)
         )
 
-async def start_command(message: types.Message, state: FSMContext):
+async def start_command(message: types.Message, state: FSMContext, dp: Dispatcher):
     user_id = message.from_user.id
     current_state = await state.get_state()
+    username = message.from_user.first_name
     logger.debug(f"start_command: user_id={user_id}, text='{message.text}', state={current_state}")
     try:
         # Очистка текущего состояния
@@ -102,29 +70,65 @@ async def start_command(message: types.Message, state: FSMContext):
             await state.clear()
             logger.debug(f"Состояние {current_state} очищено для user_id={user_id} при /start")
 
-        allowed, role = await check_role(message, allow_unregistered=True)
-        if not allowed or not role:
+        # Проверка, является ли пользователь админом
+        if user_id in ADMIN_IDS:
+            logger.debug(f"Админ {user_id} перенаправлен в админ-панель")
+            async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
+                await conn.execute(
+                    "INSERT OR REPLACE INTO users (id, role, phone_number, created_at) VALUES (?, ?, ?, ?)",
+                    (user_id, ADMIN_ROLE, f"admin_{user_id}", format_uz_datetime(datetime.now(pytz.UTC)))
+                )
+                await conn.commit()
             await message.answer(
-                "Илтимос, рўйхатдан ўтинг:",
+                "Админ панели:",
+                reply_markup=get_admin_menu()
+            )
+            await state.set_state("AdminStates:main_menu")
+            logger.info(f"Админ {user_id} вошёл в админ-панель")
+            return
+
+        # Проверка, зарегистрирован ли пользователь
+        async with aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT) as conn:
+            async with conn.execute(
+                "SELECT role, region, district, phone_number FROM users WHERE id = ?",
+                (user_id,)
+            ) as cursor:
+                user = await cursor.fetchone()
+
+        # Новый пользователь
+        if not user or not all([user[0], user[1], user[3]]):
+            logger.debug(f"Новый пользователь user_id={user_id} перенаправлен на регистрацию")
+            await message.answer(
+                f"Хуш келибсиз, {username}! Рўйхатдан ўтиш тугмасини босинг:",
                 reply_markup=make_keyboard(["Рўйхатдан ўтиш"], one_time=True)
             )
             await state.set_state("Registration:start")
-            logger.info(f"Незарегистрированный пользователь {user_id} перенаправлен на регистрацию")
+            logger.info(f"Новый пользователь {user_id} перенаправлен на регистрацию")
             return
 
-        channel_active, bot_active, is_subscribed = await check_subscription(message.bot, user_id)
-        logger.debug(f"Подписка: user_id={user_id}, channel_active={channel_active}, bot_active={bot_active}, is_subscribed={is_subscribed}")
-        if not is_subscribed and role != "admin":
+        # Зарегистрированный пользователь
+        role = user[0]
+        _, bot_active, is_subscribed = await check_subscription(message.bot, user_id, dp.storage)
+        logger.debug(f"Подписка: user_id={user_id}, bot_active={bot_active}, is_subscribed={is_subscribed}")
+
+        if not is_subscribed:
+            logger.debug(f"Пользователь user_id={user_id} без подписки перенаправлен на подписку")
             await message.answer(
-                "Сизда фаол обуна мавжуд эмас. 'Обуна' тугмасини босинг:",
+                "Сизнинг обунангиз тугаган. Обуна тугмасини босинг:",
                 reply_markup=make_keyboard(["Обуна", "Орқага"], columns=2, one_time=True)
             )
             await state.set_state("Registration:subscription")
             logger.info(f"Пользователь {user_id} перенаправлен на подписку")
             return
 
-        await message.answer("Асосий меню:", reply_markup=get_main_menu(role))
+        # Пользователь с активной подпиской
+        logger.debug(f"Отправка главного меню для user_id={user_id}, role={role}")
+        await message.answer(
+            "Асосий меню",
+            reply_markup=get_main_menu(role)
+        )
         logger.info(f"Пользователь {user_id} с ролью {role} вошёл в главное меню")
+
     except Exception as e:
         logger.error(f"Ошибка в start_command для user_id={user_id}: {e}", exc_info=True)
         await notify_admin(f"Ошибка в start_command для user_id={user_id}: {str(e)}", bot=message.bot)
@@ -142,61 +146,70 @@ async def cancel_command(message: types.Message, state: FSMContext):
             await message.answer(ACTION_CANCELLED, reply_markup=get_main_menu(role))
         else:
             await message.answer(ACTION_CANCELLED, reply_markup=make_keyboard(["Рўйхатдан ўтиш"], one_time=True))
-        logger.info(f"Фойдаланувчи {user_id} амални бекор қилди")
+        logger.info(f"Пользователь {user_id} отменил действие")
     except Exception as e:
-        logger.error(f"/cancel командасида хатолик user_id={user_id}: {e}")
-        await notify_admin(f"cancel_command да хатолик user_id={user_id}: {str(e)}", bot=message.bot)
+        logger.error(f"Ошибка в cancel_command для user_id={user_id}: {e}", exc_info=True)
+        await notify_admin(f"Ошибка в cancel_command для user_id={user_id}: {str(e)}", bot=message.bot)
         await message.answer(
             ERROR_MESSAGE,
             reply_markup=make_keyboard(["Рўйхатдан ўтиш"], one_time=True)
         )
 
-async def my_id(message: types.Message, state: FSMContext):
+async def my_id(message: types.Message, state: FSMContext, dp: Dispatcher):
     user_id = message.from_user.id
     current_state = await state.get_state()
     if current_state:
         await state.clear()
-        logger.debug(f"Ҳолат {current_state} /myid дан олдин user_id={user_id} учун тозаланди")
+        logger.debug(f"Состояние {current_state} очищено для user_id={user_id} при /myid")
     allowed, role = await check_role(message, allow_unregistered=True)
     try:
-        _, bot_active, _ = await check_subscription(message.bot, user_id)
+        _, bot_active, is_subscribed = await check_subscription(message.bot, user_id, dp.storage)
         await message.answer(
             YOUR_ID.format(telegram_id=user_id),
-            reply_markup=make_keyboard(["Обуна"], one_time=True) if not bot_active else get_main_menu(role)
+            reply_markup=make_keyboard(["Обуна"], one_time=True) if not is_subscribed else get_main_menu(role)
         )
-        logger.info(f"Фойдаланувчи {user_id} ўз ID сини сўради")
+        logger.info(f"Пользователь {user_id} запросил свой ID")
     except Exception as e:
-        logger.error(f"/myid командасида хатолик user_id={user_id}: {e}")
-        await notify_admin(f"my_id да хатолик user_id={user_id}: {str(e)}", bot=message.bot)
+        logger.error(f"Ошибка в my_id для user_id={user_id}: {e}", exc_info=True)
+        await notify_admin(f"Ошибка в my_id для user_id={user_id}: {str(e)}", bot=message.bot)
         await message.answer(
             ERROR_MESSAGE,
             reply_markup=make_keyboard(["Рўйхатдан ўтиш"], one_time=True)
         )
 
-async def handle_subscription_request(message: types.Message, state: FSMContext):
+async def handle_subscription_request(message: types.Message, state: FSMContext, dp: Dispatcher):
     user_id = message.from_user.id
     current_state = await state.get_state()
-    if current_state and current_state != "Registration:subscription":
+    logger.debug(f"handle_subscription_request: user_id={user_id}, text='{message.text}', state={current_state}")
+    try:
+        if current_state and current_state != "Registration:subscription":
+            await state.clear()
+            logger.debug(f"Состояние {current_state} очищено для user_id={user_id} при запросе подписки")
+        if message.text not in ["Обуна", "/subscribe"]:
+            await message.answer(
+                "Илтимос, 'Обуна' тугмасини босинг:",
+                reply_markup=make_keyboard(["Обуна"], one_time=True)
+            )
+            logger.info(f"Пользователь {user_id} отправил некорректный текст для подписки: {message.text}")
+            return
+        allowed, role = await check_role(message, allow_unregistered=True)
+        if not allowed or not role:
+            await message.answer(
+                NOT_REGISTERED,
+                reply_markup=make_keyboard(["Рўйхатдан ўтиш"], one_time=True)
+            )
+            logger.info(f"Незарегистрированный пользователь {user_id} запросил подписку, роль: None")
+            return
+        await send_subscription_info(message, user_id, role, dp.storage)
         await state.clear()
-        logger.debug(f"Ҳолат {current_state} /subscribe ёки 'Обуна' дан олдин user_id={user_id} учун тозаланди")
-    allowed, role = await check_role(message, allow_unregistered=True)
-    if not allowed or not role:
+        logger.info(f"Пользователь {user_id} с ролью {role} запросил подписку")
+    except Exception as e:
+        logger.error(f"Ошибка в handle_subscription_request для user_id={user_id}: {e}", exc_info=True)
+        await notify_admin(f"Ошибка в handle_subscription_request для user_id={user_id}: {str(e)}", bot=message.bot)
         await message.answer(
-            NOT_REGISTERED,
-            reply_markup=make_keyboard(["Рўйхатдан ўтиш"], one_time=True)
+            ERROR_MESSAGE,
+            reply_markup=make_keyboard(["Орқага"], one_time=True)
         )
-        logger.info(f"Рўйхатдан ўтмаган фойдаланувчи {user_id} обуна сўради, роль: None")
-        return
-    logger.info(f"Фойдаланувчи {user_id} обуна сўради, роль: {role}")
-    await message.answer(
-        "Тўлиқ обуна (30 кун):\n"
-        "1. Каналга обуна: 10,000 сўм\n"
-        "2. Бот + Канал: 50,000 сўм/ой\n"
-        "Тўловдан сўнг админга ёзинг (@ad_mbozor) ва user_id ни юборинг: /myid\n"
-        "Тўлов усуллари: Click ёки Payme (админдан сўранг).",
-        reply_markup=make_keyboard(["Асосий меню"], one_time=True)
-    )
-    await state.clear()
 
 async def reset_state(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
@@ -205,14 +218,15 @@ async def reset_state(message: types.Message, state: FSMContext):
     await state.clear()
     allowed, role = await check_role(message, allow_unregistered=True)
     reply_markup = get_main_menu(role) if allowed else make_keyboard(["Рўйхатдан ўтиш"], one_time=True)
-    await message.answer("Состояние сброшено. Выберите действие:", reply_markup=reply_markup)
+    await message.answer("Ҳолат тозаланди. Амални танланг:", reply_markup=reply_markup)
     logger.info(f"Состояние сброшено для user_id={user_id}")
 
 def register_handlers(dp: Dispatcher):
+    logger.info("Registering common handlers")
     dp.message.register(start_command, Command("start"))
     dp.message.register(cancel_command, Command("cancel"))
     dp.message.register(my_id, Command("myid"))
     dp.message.register(handle_subscription_request, Command("subscribe"))
     dp.message.register(handle_subscription_request, F.text == "Обуна")
     dp.message.register(reset_state, Command("reset"))
-    logger.info("Умумий обработчиклар рўйхатдан ўтказилди")
+    logger.info("Common handlers registered")
