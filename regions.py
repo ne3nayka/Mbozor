@@ -1,4 +1,3 @@
-# regions.py
 from typing import Dict, List
 
 REGIONS_DATA: Dict[str, List[str]] = {
@@ -209,6 +208,19 @@ REGIONS_DATA: Dict[str, List[str]] = {
     ],
     "Тошкент шаҳри": []  # Оставлен пустым, так как в городе нет туманов
 }
+
+def validate_regions_data():
+    """Валидирует REGIONS_DATA на пустые регионы, пустые списки районов и дубликаты."""
+    for region, districts in REGIONS_DATA.items():
+        if not region.strip():
+            raise ValueError("Пустое название региона")
+        if len(districts) == 0 and region != "Тошкент шаҳри":
+            raise ValueError(f"Нет районов для региона: {region}")
+    if len(set(REGIONS_DATA.keys())) != len(REGIONS_DATA):
+        raise ValueError("Дубликаты регионов")
+
+# Выполнить валидацию при загрузке модуля
+validate_regions_data()
 
 def get_all_regions() -> List[str]:
     """Возвращает список всех регионов (областей, городов).
